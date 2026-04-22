@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradeLog Pro</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'DM Sans',sans-serif;background:#080a0e;color:#e2e8f0;min-height:100vh;font-size:14px;}
+.app{display:flex;flex-direction:column;height:100vh;overflow:hidden;}
+nav{background:#0c0e14;border-bottom:1px solid #1a1f2e;padding:0 20px;display:flex;align-items:center;gap:16px;height:52px;flex-shrink:0;z-index:100;}
+.logo{display:flex;align-items:center;gap:8px;font-weight:600;font-size:15px;color:#fff;letter-spacing:-0.3px;margin-right:8px;}
+.logo-mark{width:28px;height:28px;background:#2563eb;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;}
+.nav-tab{padding:5px 12px;border-radius:6px;font-size:12px;color:#6b7898;cursor:pointer;border:none;background:transparent;font-family:'DM Sans',sans-serif;transition:all .15s;}
+.nav-tab:hover{background:#161b28;color:#b0bcd4;}
+.nav-tab.active{background:#1a2035;color:#fff;}
+.nav-right{margin-left:auto;display:flex;align-items:center;gap:8px;}
+.btn{padding:6px 14px;border-radius:7px;font-size:12px;font-family:'DM Sans',sans-serif;font-weight:500;cursor:pointer;border:none;transition:all .15s;}
+.btn-primary{background:#2563eb;color:#fff;}
+.btn-primary:hover{background:#1d4ed8;}
+.btn-ghost{background:transparent;color:#6b7898;border:1px solid #1a1f2e;}
+.btn-ghost:hover{background:#161b28;color:#b0bcd4;}
+.btn-danger{background:#7f1d1d;color:#fca5a5;border:none;}
+.btn-danger:hover{background:#991b1b;}
+.body{display:flex;flex:1;overflow:hidden;}
+.sidebar{width:220px;background:#0c0e14;border-right:1px solid #1a1f2e;display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto;}
+.sidebar-top{padding:14px 12px 8px;}
+.sidebar-section-label{font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:1.2px;font-weight:500;padding:0 8px;margin-bottom:6px;margin-top:14px;}
+.sidebar-item{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:6px;font-size:12px;color:#6b7898;cursor:pointer;margin-bottom:1px;transition:all .15s;}
+.sidebar-item:hover{background:#161b28;color:#c8d4e8;}
+.accounts-list{padding:0 12px;}
+.account-row{display:flex;align-items:center;gap:8px;padding:8px;border-radius:8px;cursor:pointer;margin-bottom:2px;transition:all .15s;border:1px solid transparent;}
+.account-row:hover{background:#161b28;border-color:#1a1f2e;}
+.account-row.active{background:#1a2035;border-color:#2a3558;}
+.account-avatar{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex-shrink:0;}
+.account-info{flex:1;min-width:0;}
+.account-name{font-size:12px;color:#c8d4e8;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.account-pnl{font-size:11px;font-family:'DM Mono',monospace;}
+.account-pnl.pos{color:#22c55e;}.account-pnl.neg{color:#ef4444;}.account-pnl.neutral{color:#6b7898;}
+.add-account-btn{display:flex;align-items:center;gap:6px;padding:8px;border-radius:8px;cursor:pointer;font-size:12px;color:#4b5a7a;border:1px dashed #1a2535;margin:8px 12px;transition:all .15s;}
+.add-account-btn:hover{border-color:#2563eb;color:#3b82f6;background:#0f1520;}
+.all-badge{display:flex;align-items:center;gap:8px;padding:8px;border-radius:8px;cursor:pointer;margin:0 12px 4px;transition:all .15s;border:1px solid transparent;}
+.all-badge:hover{background:#161b28;}
+.all-badge.active{background:#1a2035;border-color:#2a3558;}
+.all-dot{width:28px;height:28px;border-radius:7px;background:#1e2a45;display:flex;align-items:center;justify-content:center;font-size:13px;}
+.content{flex:1;overflow-y:auto;padding:20px;}
+::-webkit-scrollbar{width:5px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:#1e2535;border-radius:3px;}
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:400px;text-align:center;}
+.empty-icon{width:60px;height:60px;background:#131825;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:26px;margin-bottom:20px;border:1px solid #1a2535;}
+.empty-title{font-size:17px;font-weight:600;color:#c8d4e8;margin-bottom:8px;}
+.empty-sub{font-size:13px;color:#4b5a7a;max-width:320px;line-height:1.6;}
+.filter-bar{display:flex;align-items:center;gap:8px;margin-bottom:18px;flex-wrap:wrap;}
+.page-title{font-size:17px;font-weight:600;color:#fff;margin-right:4px;}
+.spacer{flex:1;}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px;}
+.stat-card{background:#0c0e14;border:1px solid #1a1f2e;border-radius:10px;padding:14px;}
+.stat-label{font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:7px;}
+.stat-val{font-size:20px;font-weight:600;font-family:'DM Mono',monospace;letter-spacing:-.5px;}
+.stat-val.g{color:#22c55e;}.stat-val.r{color:#ef4444;}.stat-val.b{color:#3b82f6;}.stat-val.w{color:#e2e8f0;}
+.stat-sub{font-size:10px;color:#374060;margin-top:4px;}
+.chart-card{background:#0c0e14;border:1px solid #1a1f2e;border-radius:10px;padding:16px;margin-bottom:14px;}
+.chart-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+.chart-title{font-size:12px;font-weight:500;color:#b0bcd4;}
+.chip{font-size:10px;padding:2px 7px;border-radius:4px;background:#161b28;color:#4b5a7a;}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;}
+.g3{display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-bottom:14px;}
+.table-card{background:#0c0e14;border:1px solid #1a1f2e;border-radius:10px;overflow:hidden;margin-bottom:14px;}
+.table-head{padding:14px 18px;border-bottom:1px solid #1a1f2e;display:flex;align-items:center;justify-content:space-between;}
+.table-title{font-size:12px;font-weight:500;color:#b0bcd4;}
+table{width:100%;border-collapse:collapse;}
+th{padding:8px 14px;text-align:left;font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.8px;font-weight:500;border-bottom:1px solid #131825;background:#0a0c11;}
+td{padding:9px 14px;border-bottom:1px solid #111420;color:#8090b0;font-family:'DM Mono',monospace;font-size:11px;}
+tr:last-child td{border-bottom:none;}tr:hover td{background:#0e1220;}
+.sym{color:#c8d4e8;font-weight:500;font-family:'DM Sans',sans-serif;}
+.tg{color:#22c55e;}.tr{color:#ef4444;}
+.pill{display:inline-block;padding:2px 6px;border-radius:4px;font-size:9px;font-family:'DM Sans',sans-serif;}
+.pill-l{background:#0a2016;color:#22c55e;}.pill-s{background:#200a0a;color:#ef4444;}
+.acct-chip{display:inline-block;padding:2px 7px;border-radius:4px;font-size:9px;font-family:'DM Sans',sans-serif;font-weight:500;}
+.prog-row{display:flex;align-items:center;gap:8px;margin-bottom:9px;}
+.prog-label{font-size:11px;color:#6b7898;min-width:72px;}
+.prog-track{flex:1;height:5px;background:#161b28;border-radius:3px;overflow:hidden;}
+.prog-fill{height:100%;border-radius:3px;}
+.prog-fill.g{background:#22c55e;}.prog-fill.r{background:#ef4444;}.prog-fill.b{background:#3b82f6;}
+.prog-val{font-size:11px;font-family:'DM Mono',monospace;min-width:50px;text-align:right;color:#b0bcd4;}
+.modal-bg{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.75);display:none;align-items:center;justify-content:center;z-index:999;}
+.modal-bg.open{display:flex;}
+.modal{background:#0f1220;border:1px solid #1e2540;border-radius:14px;padding:24px;width:380px;max-width:90vw;}
+.modal-title{font-size:15px;font-weight:600;color:#fff;margin-bottom:18px;}
+.modal-label{font-size:11px;color:#6b7898;margin-bottom:6px;}
+.modal-input{width:100%;background:#161b28;border:1px solid #1e2540;border-radius:7px;padding:9px 12px;color:#e2e8f0;font-family:'DM Sans',sans-serif;font-size:13px;margin-bottom:14px;outline:none;}
+.modal-input:focus{border-color:#2563eb;}
+.color-row{display:flex;gap:8px;margin-bottom:18px;}
+.color-swatch{width:28px;height:28px;border-radius:7px;cursor:pointer;border:2px solid transparent;transition:all .15s;}
+.color-swatch.selected{border-color:#fff;transform:scale(1.1);}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end;}
+.acct-mgr-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;border:1px solid #1a1f2e;margin-bottom:8px;background:#0c0e14;}
+.acct-mgr-info{flex:1;}
+.acct-mgr-name{font-size:13px;color:#c8d4e8;font-weight:500;}
+.acct-mgr-meta{font-size:11px;color:#4b5a7a;margin-top:2px;}
+input[type=file]{display:none;}
+.drop-zone{border:2px dashed #1a2535;border-radius:12px;padding:36px 20px;text-align:center;cursor:pointer;transition:all .2s;background:#0a0c11;}
+.drop-zone:hover,.drop-zone.over{border-color:#2563eb;background:#0a1020;}
+.drop-icon{font-size:28px;margin-bottom:12px;}
+.drop-title{font-size:14px;font-weight:500;color:#b0bcd4;margin-bottom:4px;}
+.drop-sub{font-size:12px;color:#374060;}
+.drop-sub span{color:#3b82f6;cursor:pointer;}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;}
+.cal-dh{font-size:9px;color:#374060;text-align:center;padding:4px;text-transform:uppercase;}
+.cal-d{aspect-ratio:1;border-radius:5px;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+.cal-d.empty{background:transparent;}
+.cal-d.nt{background:#111520;color:#374060;}
+.cal-d.win{background:#091a10;color:#22c55e;}
+.cal-d.loss{background:#1a0909;color:#ef4444;}
+.cal-d.today{outline:1px solid #2563eb;}
+.cal-dn{font-size:8px;opacity:.5;}
+.cal-pnl{font-size:9px;font-family:'DM Mono',monospace;font-weight:500;}
+/* SYNC STATUS */
+.sync-bar{display:flex;align-items:center;gap:6px;font-size:11px;color:#4b5a7a;padding:4px 8px;border-radius:5px;}
+.sync-dot{width:6px;height:6px;border-radius:50%;background:#374060;flex-shrink:0;}
+.sync-dot.ok{background:#22c55e;}.sync-dot.syncing{background:#f59e0b;animation:pulse 1s infinite;}
+.sync-dot.err{background:#ef4444;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
+/* TOAST */
+.toast{position:fixed;bottom:24px;right:24px;background:#1a2035;border:1px solid #2a3558;border-radius:8px;padding:10px 16px;font-size:12px;color:#c8d4e8;z-index:9999;transform:translateY(60px);opacity:0;transition:all .3s;}
+.toast.show{transform:translateY(0);opacity:1;}
+.toast.success{border-color:#22c55e;color:#22c55e;}
+.toast.error{border-color:#ef4444;color:#ef4444;}
+</style>
+</head>
+<body>
+<div class="app">
+<nav>
+  <div class="logo"><div class="logo-mark">📈</div>TradeLog Pro</div>
+  <button class="nav-tab active" onclick="setTab('dashboard',this)">Dashboard</button>
+  <button class="nav-tab" onclick="setTab('trades',this)">Trades</button>
+  <button class="nav-tab" onclick="setTab('calendar',this)">Calendar</button>
+  <button class="nav-tab" onclick="setTab('accounts',this)">Accounts</button>
+  <div class="nav-right">
+    <div class="sync-bar"><div class="sync-dot syncing" id="syncDot"></div><span id="syncLabel">Connecting...</span></div>
+    <button class="btn btn-ghost" onclick="showImportModal()">↑ Import CSV</button>
+    <button class="btn btn-primary" onclick="showAddAccount()">+ Account</button>
+  </div>
+</nav>
+<div class="body">
+  <aside class="sidebar">
+    <div class="sidebar-top">
+      <div class="sidebar-section-label">Views</div>
+      <div class="all-badge active" id="allBadge" onclick="selectAccount('all')">
+        <div class="all-dot">⊞</div>
+        <div>
+          <div style="font-size:12px;color:#c8d4e8;font-weight:500;">All Accounts</div>
+          <div class="account-pnl neutral" id="allPnl">–</div>
+        </div>
+      </div>
+      <div class="sidebar-section-label" style="margin-top:12px;">Accounts</div>
+      <div class="accounts-list" id="accountsList"></div>
+      <div class="add-account-btn" onclick="showAddAccount()">＋ Add Account</div>
+      <div class="sidebar-section-label">Reports</div>
+      <div class="sidebar-item">By Symbol</div>
+      <div class="sidebar-item">By Session</div>
+      <div class="sidebar-item">By Duration</div>
+    </div>
+  </aside>
+  <div class="content">
+    <div class="empty-state" id="emptyState">
+      <div class="empty-icon">🗂</div>
+      <div class="empty-title" id="emptyTitle">Connecting to cloud...</div>
+      <div class="empty-sub" id="emptySub">Loading your data from Supabase.</div>
+    </div>
+    <div id="dashboardView" style="display:none;"></div>
+    <div id="tradesView" style="display:none;"></div>
+    <div id="calendarView" style="display:none;"></div>
+    <div id="accountsView" style="display:none;"></div>
+  </div>
+</div>
+</div>
+
+<!-- MODALS -->
+<div class="modal-bg" id="addAccountModal">
+  <div class="modal">
+    <div class="modal-title">Add Trading Account</div>
+    <div class="modal-label">Account Name</div>
+    <input class="modal-input" id="acctName" placeholder="e.g. Apex Funded, Personal, TopStep"/>
+    <div class="modal-label">Account Type</div>
+    <select class="modal-input" id="acctType">
+      <option>Funded</option><option>Personal</option><option>Evaluation</option><option>Demo</option><option>Other</option>
+    </select>
+    <div class="modal-label">Color</div>
+    <div class="color-row" id="colorRow"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('addAccountModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="createAccount()">Create Account</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="importModal">
+  <div class="modal">
+    <div class="modal-title">Import Trades</div>
+    <div class="modal-label">Select Account</div>
+    <select class="modal-input" id="importAcctSelect"></select>
+    <div class="drop-zone" id="importDrop"
+      ondragover="event.preventDefault();this.classList.add('over')"
+      ondragleave="this.classList.remove('over')"
+      ondrop="handleDrop(event)">
+      <div class="drop-icon">📂</div>
+      <div class="drop-title">Drop Tradovate CSV here</div>
+      <div class="drop-sub">or <span onclick="document.getElementById('csvInput').click()">browse files</span></div>
+    </div>
+    <input type="file" id="csvInput" accept=".csv" onchange="handleFileInput(event)">
+    <div id="importProgress" style="display:none;margin-top:12px;font-size:12px;color:#6b7898;text-align:center;"></div>
+    <div class="modal-actions" style="margin-top:14px;">
+      <button class="btn btn-ghost" onclick="closeModal('importModal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+// ─── SUPABASE CONFIG ──────────────────────────────────────────────────────────
+const SUPABASE_URL = 'https://syjwahkwsvkohleknmna.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN5andhaGt3c3Zrb2hsZWtubW5hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4NTg2MDMsImV4cCI6MjA5MjQzNDYwM30.DpZlMPXfcQzSEj47sKvtWXYFfYfy7vkoAv7YWPxp7Wg';
+
+const sb = {
+  async get(table, query='') {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, {
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' }
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  },
+  async post(table, data) {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+      method: 'POST',
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify(data)
+    });
+    if (!r.ok) throw new Error(await r.text());
+  },
+  async delete(table, query) {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, {
+      method: 'DELETE',
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' }
+    });
+    if (!r.ok) throw new Error(await r.text());
+  }
+};
+
+// ─── STATE ────────────────────────────────────────────────────────────────────
+let state = { accounts: [], selectedAccount: 'all', activeTab: 'dashboard' };
+let charts = {};
+const COLORS = [
+  {bg:'#1d4ed8'},{bg:'#16a34a'},{bg:'#9333ea'},{bg:'#ea580c'},
+  {bg:'#0891b2'},{bg:'#e11d48'},{bg:'#ca8a04'},{bg:'#475569'}
+];
+let selectedColor = COLORS[0];
+
+// ─── TOAST ────────────────────────────────────────────────────────────────────
+function toast(msg, type='') {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.className = `toast ${type} show`;
+  setTimeout(() => el.className = 'toast', 3000);
+}
+
+// ─── SYNC STATUS ──────────────────────────────────────────────────────────────
+function setSyncStatus(status, label) {
+  const dot = document.getElementById('syncDot');
+  const lbl = document.getElementById('syncLabel');
+  dot.className = `sync-dot ${status}`;
+  lbl.textContent = label;
+}
+
+// ─── LOAD DATA ────────────────────────────────────────────────────────────────
+async function loadData() {
+  setSyncStatus('syncing', 'Loading...');
+  try {
+    const [accounts, trades] = await Promise.all([
+      sb.get('accounts', '?order=created_at.asc'),
+      sb.get('trades', '?order=date.asc')
+    ]);
+    state.accounts = accounts.map(a => ({
+      ...a,
+      trades: trades.filter(t => t.account_id === a.id).map(t => ({
+        date: new Date(t.date),
+        symbol: t.symbol,
+        side: t.side,
+        qty: t.qty,
+        entry: t.entry,
+        exit: t.exit,
+        pnl: t.pnl,
+        fees: t.fees,
+        netPnl: t.net_pnl,
+        dbId: t.id
+      }))
+    }));
+    setSyncStatus('ok', 'Synced');
+    document.getElementById('emptyTitle').textContent = state.accounts.length ? 'No trades yet' : 'No accounts yet';
+    document.getElementById('emptySub').textContent = state.accounts.length
+      ? 'Import a Tradovate CSV to get started.'
+      : 'Create your first account to get started.';
+    renderAll();
+  } catch(e) {
+    setSyncStatus('err', 'Connection error');
+    document.getElementById('emptyTitle').textContent = 'Could not connect';
+    document.getElementById('emptySub').textContent = 'Check your internet connection. Data may be unavailable.';
+    toast('Failed to connect to Supabase', 'error');
+  }
+}
+
+// ─── ACCOUNTS ─────────────────────────────────────────────────────────────────
+function showAddAccount() {
+  document.getElementById('acctName').value = '';
+  selectedColor = COLORS[0];
+  renderColorSwatches();
+  openModal('addAccountModal');
+}
+
+function renderColorSwatches() {
+  document.getElementById('colorRow').innerHTML = COLORS.map((c,i) =>
+    `<div class="color-swatch${c===selectedColor?' selected':''}" style="background:${c.bg}" onclick="pickColor(${i})"></div>`
+  ).join('');
+}
+function pickColor(i) { selectedColor = COLORS[i]; renderColorSwatches(); }
+
+async function createAccount() {
+  const name = document.getElementById('acctName').value.trim();
+  if (!name) return;
+  const acct = {
+    id: 'acct_' + Date.now(),
+    name,
+    type: document.getElementById('acctType').value,
+    color: selectedColor.bg,
+    created_at: new Date().toISOString()
+  };
+  setSyncStatus('syncing', 'Saving...');
+  try {
+    await sb.post('accounts', acct);
+    state.accounts.push({ ...acct, trades: [] });
+    setSyncStatus('ok', 'Synced');
+    toast('Account created', 'success');
+    closeModal('addAccountModal');
+    state.selectedAccount = acct.id;
+    renderAll();
+  } catch(e) {
+    setSyncStatus('err', 'Save failed');
+    toast('Failed to save account: ' + e.message, 'error');
+  }
+}
+
+async function deleteAccount(id) {
+  if (!confirm('Delete this account and ALL its trades?')) return;
+  setSyncStatus('syncing', 'Deleting...');
+  try {
+    await sb.delete('trades', `?account_id=eq.${id}`);
+    await sb.delete('accounts', `?id=eq.${id}`);
+    state.accounts = state.accounts.filter(a => a.id !== id);
+    if (state.selectedAccount === id) state.selectedAccount = 'all';
+    setSyncStatus('ok', 'Synced');
+    toast('Account deleted', 'success');
+    renderAll();
+  } catch(e) {
+    setSyncStatus('err', 'Delete failed');
+    toast('Failed to delete: ' + e.message, 'error');
+  }
+}
+
+// ─── IMPORT ───────────────────────────────────────────────────────────────────
+function showImportModal() {
+  if (!state.accounts.length) { showAddAccount(); return; }
+  document.getElementById('importAcctSelect').innerHTML = state.accounts.map(a =>
+    `<option value="${a.id}">${a.name}</option>`).join('');
+  if (state.selectedAccount !== 'all')
+    document.getElementById('importAcctSelect').value = state.selectedAccount;
+  document.getElementById('importProgress').style.display = 'none';
+  openModal('importModal');
+}
+
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('importDrop').classList.remove('over');
+  if (e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]);
+}
+function handleFileInput(e) { if (e.target.files[0]) processFile(e.target.files[0]); }
+
+async function processFile(file) {
+  const reader = new FileReader();
+  reader.onload = async e => {
+    const trades = parseTradovate(e.target.result);
+    if (!trades.length) { toast('No trades found in file', 'error'); return; }
+
+    const acctId = document.getElementById('importAcctSelect').value;
+    const acct = state.accounts.find(a => a.id === acctId);
+    if (!acct) return;
+
+    // Deduplicate
+    const existing = new Set(acct.trades.map(t => `${new Date(t.date).toISOString()}|${t.symbol}|${t.pnl}`));
+    const newTrades = trades.filter(t => !existing.has(`${t.date.toISOString()}|${t.symbol}|${t.pnl}`));
+
+    if (!newTrades.length) { toast('No new trades found (already imported)', ''); closeModal('importModal'); return; }
+
+    const prog = document.getElementById('importProgress');
+    prog.style.display = 'block';
+    prog.textContent = `Uploading ${newTrades.length} trades...`;
+    setSyncStatus('syncing', 'Uploading...');
+
+    try {
+      // Insert in batches of 100
+      const rows = newTrades.map(t => ({
+        id: 'tr_' + Date.now() + '_' + Math.random().toString(36).slice(2,8),
+        account_id: acctId,
+        date: t.date.toISOString(),
+        symbol: t.symbol,
+        side: t.side,
+        qty: t.qty,
+        entry: t.entry,
+        exit: t.exit,
+        pnl: t.pnl,
+        fees: t.fees,
+        net_pnl: t.netPnl
+      }));
+
+      for (let i = 0; i < rows.length; i += 100) {
+        await sb.post('trades', rows.slice(i, i+100));
+        prog.textContent = `Uploaded ${Math.min(i+100, rows.length)} / ${rows.length} trades...`;
+      }
+
+      newTrades.forEach(t => acct.trades.push(t));
+      acct.trades.sort((a,b) => a.date - b.date);
+      setSyncStatus('ok', 'Synced');
+      toast(`${newTrades.length} trades imported!`, 'success');
+      closeModal('importModal');
+      state.selectedAccount = acctId;
+      renderAll();
+    } catch(e) {
+      setSyncStatus('err', 'Upload failed');
+      toast('Upload failed: ' + e.message, 'error');
+    }
+  };
+  reader.readAsText(file);
+}
+
+function parseTradovate(text) {
+  const lines = text.split('\n').filter(l => l.trim());
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',').map(h => h.trim().replace(/"/g,'').toLowerCase());
+  const trades = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = parseRow(lines[i]);
+    if (cols.length < 3) continue;
+    const r = {};
+    headers.forEach((h,idx) => r[h] = (cols[idx]||'').trim().replace(/"/g,''));
+    const pnl = parseFloat(r['pnl']||r['realized p&l']||r['realizedpnl']||r['net p&l']||r['profit']||0);
+    const qty = parseFloat(r['qty']||r['quantity']||r['filled qty']||1);
+    const symbol = (r['contract']||r['symbol']||r['instrument']||'UNKNOWN').replace(/\s+/g,'');
+    const side = r['side']||r['buy/sell']||r['action']||'Long';
+    const entry = parseFloat(r['avg fill price']||r['entry price']||r['price']||0);
+    const exit = parseFloat(r['exit price']||0);
+    const fees = parseFloat(r['commission']||r['fees']||r['commissions']||0);
+    const dateStr = r['fill time']||r['date/time']||r['timestamp']||r['date']||'';
+    const date = dateStr ? new Date(dateStr) : new Date();
+    if (isNaN(date.getTime())) continue;
+    const isSide = side.toLowerCase().includes('sell')||side.toLowerCase().includes('short') ? 'Short' : 'Long';
+    trades.push({ date, symbol, side:isSide, qty, entry, exit, pnl:pnl||0, fees:Math.abs(fees), netPnl:(pnl||0)-Math.abs(fees) });
+  }
+  return trades;
+}
+
+function parseRow(line) {
+  const res=[]; let cur='', inQ=false;
+  for(let c of line){ if(c==='"') inQ=!inQ; else if(c===','&&!inQ){res.push(cur);cur='';} else cur+=c; }
+  res.push(cur); return res;
+}
+
+// ─── NAVIGATION ───────────────────────────────────────────────────────────────
+function selectAccount(id) { state.selectedAccount = id; renderAll(); }
+function setTab(tab, el) {
+  state.activeTab = tab;
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  renderContent();
+}
+
+// ─── RENDER ───────────────────────────────────────────────────────────────────
+function renderAll() { renderSidebar(); renderContent(); }
+
+function renderSidebar() {
+  document.getElementById('accountsList').innerHTML = state.accounts.map(a => {
+    const pnl = a.trades.reduce((s,t)=>s+t.netPnl,0);
+    return `<div class="account-row${state.selectedAccount===a.id?' active':''}" onclick="selectAccount('${a.id}')">
+      <div class="account-avatar" style="background:${a.color}20;color:${a.color}">${a.name[0].toUpperCase()}</div>
+      <div class="account-info">
+        <div class="account-name">${a.name}</div>
+        <div class="account-pnl ${pnl>0?'pos':pnl<0?'neg':'neutral'}">${a.trades.length?fmtM(pnl):'No trades'}</div>
+      </div>
+    </div>`;
+  }).join('');
+  const totalPnl = state.accounts.reduce((s,a)=>s+a.trades.reduce((ss,t)=>ss+t.netPnl,0),0);
+  const el = document.getElementById('allPnl');
+  el.className = 'account-pnl '+(totalPnl>0?'pos':totalPnl<0?'neg':'neutral');
+  el.textContent = state.accounts.length ? fmtM(totalPnl) : '–';
+  document.getElementById('allBadge').classList.toggle('active', state.selectedAccount==='all');
+}
+
+function getActiveTrades() {
+  if (state.selectedAccount==='all')
+    return state.accounts.flatMap(a=>a.trades.map(t=>({...t,accountId:a.id,accountName:a.name,accountColor:a.color})));
+  const acct = state.accounts.find(a=>a.id===state.selectedAccount);
+  return acct ? acct.trades.map(t=>({...t,accountId:acct.id,accountName:acct.name,accountColor:acct.color})) : [];
+}
+
+function renderContent() {
+  const trades = getActiveTrades().sort((a,b)=>a.date-b.date);
+  const hasAccounts = state.accounts.length > 0;
+  const hasTrades = trades.length > 0;
+  document.getElementById('emptyState').style.display = (!hasAccounts||!hasTrades) ? 'flex' : 'none';
+  if (!hasAccounts) {
+    document.getElementById('emptyTitle').textContent = 'No accounts yet';
+    document.getElementById('emptySub').textContent = 'Create your first trading account to get started.';
+  } else if (!hasTrades) {
+    document.getElementById('emptyTitle').textContent = 'No trades yet';
+    document.getElementById('emptySub').textContent = 'Import a Tradovate CSV file to populate this account.';
+  }
+  ['dashboardView','tradesView','calendarView','accountsView'].forEach(v=>document.getElementById(v).style.display='none');
+  const tab = state.activeTab;
+  if (!hasTrades && tab !== 'accounts') return;
+  if (tab==='dashboard') { document.getElementById('dashboardView').style.display='block'; renderDashboard(trades); }
+  else if (tab==='trades') { document.getElementById('tradesView').style.display='block'; renderTradesView(trades); }
+  else if (tab==='calendar') { document.getElementById('calendarView').style.display='block'; renderCalendarView(trades); }
+  else if (tab==='accounts') { document.getElementById('accountsView').style.display='block'; renderAccountsView(); }
+}
+
+// ─── FORMATTING ───────────────────────────────────────────────────────────────
+function fmt(n){return(n>=0?'+':'')+new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2}).format(n);}
+function fmtM(n){return(n>=0?'+':'')+new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:0,maximumFractionDigits:0}).format(n);}
+
+// ─── DASHBOARD ────────────────────────────────────────────────────────────────
+function renderDashboard(trades) {
+  const wins=trades.filter(t=>t.pnl>0), losses=trades.filter(t=>t.pnl<0);
+  const totalPnl=trades.reduce((s,t)=>s+t.pnl,0), netPnl=trades.reduce((s,t)=>s+t.netPnl,0);
+  const wr=trades.length?wins.length/trades.length*100:0;
+  const avgWin=wins.length?wins.reduce((s,t)=>s+t.pnl,0)/wins.length:0;
+  const avgLoss=losses.length?losses.reduce((s,t)=>s+t.pnl,0)/losses.length:0;
+  const pf=losses.length&&avgLoss?Math.abs(wins.reduce((s,t)=>s+t.pnl,0)/losses.reduce((s,t)=>s+t.pnl,0)):0;
+  const exp=trades.length?totalPnl/trades.length:0;
+  const maxWin=wins.length?Math.max(...wins.map(t=>t.pnl)):0;
+  const maxLoss=losses.length?Math.min(...losses.map(t=>t.pnl)):0;
+  const fees=trades.reduce((s,t)=>s+t.fees,0);
+  const rr=avgLoss?(avgWin/Math.abs(avgLoss)).toFixed(2):'–';
+  const acctLabel=state.selectedAccount==='all'
+    ?`All Accounts <span style="font-size:12px;color:#374060;font-weight:400;">(${state.accounts.length})</span>`
+    :state.accounts.find(a=>a.id===state.selectedAccount)?.name||'';
+
+  document.getElementById('dashboardView').innerHTML=`
+    <div class="filter-bar">
+      <div class="page-title">${acctLabel}</div>
+      <div class="spacer"></div>
+      <button class="btn btn-ghost" onclick="showImportModal()">↑ Import CSV</button>
+    </div>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="stat-label">Net P&amp;L</div><div class="stat-val ${netPnl>=0?'g':'r'}">${fmtM(netPnl)}</div><div class="stat-sub">Gross: ${fmtM(totalPnl)}</div></div>
+      <div class="stat-card"><div class="stat-label">Win Rate</div><div class="stat-val ${wr>=50?'g':'r'}">${wr.toFixed(1)}%</div><div class="stat-sub">${wins.length}W / ${losses.length}L</div></div>
+      <div class="stat-card"><div class="stat-label">Profit Factor</div><div class="stat-val ${pf>=1.5?'g':pf>=1?'b':'r'}">${pf.toFixed(2)}x</div><div class="stat-sub">${pf>=1.5?'Excellent':pf>=1?'Good':'Below 1'}</div></div>
+      <div class="stat-card"><div class="stat-label">Expectancy</div><div class="stat-val ${exp>=0?'g':'r'}">${fmt(exp)}</div><div class="stat-sub">Per trade avg</div></div>
+      <div class="stat-card"><div class="stat-label">Total Trades</div><div class="stat-val w">${trades.length}</div><div class="stat-sub">${wins.length}W · ${losses.length}L</div></div>
+      <div class="stat-card"><div class="stat-label">Avg Win</div><div class="stat-val g">${fmt(avgWin)}</div><div class="stat-sub">Per winning trade</div></div>
+      <div class="stat-card"><div class="stat-label">Avg Loss</div><div class="stat-val r">${fmt(avgLoss)}</div><div class="stat-sub">Per losing trade</div></div>
+      <div class="stat-card"><div class="stat-label">Avg R:R</div><div class="stat-val b">${rr}</div><div class="stat-sub">Risk/Reward ratio</div></div>
+      <div class="stat-card"><div class="stat-label">Best Trade</div><div class="stat-val g">${fmt(maxWin)}</div><div class="stat-sub">Single trade max</div></div>
+      <div class="stat-card"><div class="stat-label">Worst Trade</div><div class="stat-val r">${fmt(maxLoss)}</div><div class="stat-sub">Single trade max</div></div>
+      <div class="stat-card"><div class="stat-label">Total Fees</div><div class="stat-val w">$${fees.toFixed(2)}</div><div class="stat-sub">Commissions paid</div></div>
+      <div class="stat-card"><div class="stat-label">Performance</div>
+        <div style="margin-top:10px;">${[1,2,3,4,5].map(i=>`<span style="display:inline-block;width:16%;height:4px;border-radius:2px;background:${i<=Math.round(Math.min(pf/3*5,5))?'#2563eb':'#1a1f2e'};margin-right:2px;"></span>`).join('')}</div>
+        <div class="stat-sub" style="margin-top:6px;">${Math.round(Math.min(pf/3*5,5))}/5 rating</div>
+      </div>
+    </div>
+    <div class="g3">
+      <div class="chart-card">
+        <div class="chart-head"><span class="chart-title">Cumulative P&amp;L</span><span class="chip">Equity Curve</span></div>
+        <div style="position:relative;height:200px;"><canvas id="eqChart" role="img" aria-label="Equity curve">Equity data</canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-head"><span class="chart-title">Performance</span></div>
+        <div>
+          <div class="prog-row"><div class="prog-label">Win Rate</div><div class="prog-track"><div class="prog-fill ${wr>=50?'g':'r'}" style="width:${wr.toFixed(0)}%"></div></div><div class="prog-val">${wr.toFixed(1)}%</div></div>
+          <div class="prog-row"><div class="prog-label">Prof. Factor</div><div class="prog-track"><div class="prog-fill ${pf>=1?'g':'r'}" style="width:${Math.min(pf/3*100,100).toFixed(0)}%"></div></div><div class="prog-val">${pf.toFixed(2)}x</div></div>
+          <div class="prog-row"><div class="prog-label">Avg R:R</div><div class="prog-track"><div class="prog-fill b" style="width:${Math.min((parseFloat(rr)||0)/5*100,100)}%"></div></div><div class="prog-val">${rr}</div></div>
+        </div>
+        ${state.selectedAccount==='all'?renderAcctBreakdown():''}
+      </div>
+    </div>
+    <div class="g2">
+      <div class="chart-card"><div class="chart-head"><span class="chart-title">Daily P&amp;L</span><span class="chip">Bar</span></div><div style="position:relative;height:170px;"><canvas id="dayChart" role="img" aria-label="Daily PnL">Daily</canvas></div></div>
+      <div class="chart-card"><div class="chart-head"><span class="chart-title">Win / Loss Split</span><span class="chip">Donut</span></div><div style="position:relative;height:170px;"><canvas id="wlChart" role="img" aria-label="Win loss">${wins.length}W ${losses.length}L</canvas></div></div>
+    </div>
+    <div class="g2">
+      <div class="chart-card"><div class="chart-head"><span class="chart-title">Top Symbols</span></div><div id="symBreak"></div></div>
+      <div class="chart-card"><div class="chart-head"><span class="chart-title">P&amp;L by Hour</span></div><div style="position:relative;height:170px;"><canvas id="hrChart" role="img" aria-label="Hourly PnL">Hourly</canvas></div></div>
+    </div>`;
+  setTimeout(()=>{drawEquity(trades);drawDaily(trades);drawWL(wins.length,losses.length);drawSymbols(trades);drawHourly(trades);},50);
+}
+
+function renderAcctBreakdown() {
+  return`<div style="border-top:1px solid #1a1f2e;margin-top:14px;padding-top:12px;">
+    <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;">By Account</div>
+    ${state.accounts.map(a=>{const pnl=a.trades.reduce((s,t)=>s+t.netPnl,0);return`<div style="display:flex;align-items:center;gap:6px;margin-bottom:7px;">
+      <div style="width:8px;height:8px;border-radius:2px;background:${a.color};flex-shrink:0;"></div>
+      <div style="font-size:11px;color:#8090b0;flex:1;">${a.name}</div>
+      <div style="font-size:11px;font-family:'DM Mono',monospace;color:${pnl>=0?'#22c55e':'#ef4444'}">${fmtM(pnl)}</div>
+    </div>`;}).join('')}
+  </div>`;
+}
+
+function dc(k){if(charts[k]){charts[k].destroy();charts[k]=null;}}
+
+function drawEquity(trades){
+  const c=document.getElementById('eqChart');if(!c)return;dc('eq');
+  let cum=0;
+  const data=trades.map(t=>{cum+=t.pnl;return parseFloat(cum.toFixed(2));});
+  const labels=trades.map(t=>t.date.toLocaleDateString('en-US',{month:'short',day:'numeric'}));
+  const pos=!data.length||data[data.length-1]>=0;
+  charts.eq=new Chart(c,{type:'line',data:{labels,datasets:[{data,borderColor:pos?'#22c55e':'#ef4444',borderWidth:2,pointRadius:trades.length>60?0:2,fill:true,backgroundColor:pos?'rgba(34,197,94,0.07)':'rgba(239,68,68,0.07)',tension:.4}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmt(c.raw)}}},
+    scales:{x:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9},maxTicksLimit:8}},y:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9},callback:v=>'$'+v.toLocaleString()}}}}});
+}
+function drawDaily(trades){
+  const c=document.getElementById('dayChart');if(!c)return;dc('day');
+  const byDay={};trades.forEach(t=>{const d=t.date.toLocaleDateString('en-US',{month:'short',day:'numeric'});byDay[d]=(byDay[d]||0)+t.pnl;});
+  const labels=Object.keys(byDay).slice(-30);const data=labels.map(l=>parseFloat(byDay[l].toFixed(2)));
+  charts.day=new Chart(c,{type:'bar',data:{labels,datasets:[{data,backgroundColor:data.map(v=>v>=0?'#22c55e':'#ef4444'),borderRadius:2}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmt(c.raw)}}},
+    scales:{x:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9},maxTicksLimit:12}},y:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9},callback:v=>'$'+v}}}}});
+}
+function drawWL(w,l){
+  const c=document.getElementById('wlChart');if(!c)return;dc('wl');
+  charts.wl=new Chart(c,{type:'doughnut',data:{labels:['Wins','Losses'],datasets:[{data:[w,l],backgroundColor:['#22c55e','#ef4444'],borderColor:'#0c0e14',borderWidth:3}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'65%',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.label+': '+c.raw}}}}});
+}
+function drawSymbols(trades){
+  const el=document.getElementById('symBreak');if(!el)return;
+  const m={};trades.forEach(t=>{if(!m[t.symbol])m[t.symbol]={pnl:0};m[t.symbol].pnl+=t.pnl;});
+  const sorted=Object.entries(m).sort((a,b)=>Math.abs(b[1].pnl)-Math.abs(a[1].pnl)).slice(0,7);
+  const max=Math.max(...sorted.map(s=>Math.abs(s[1].pnl)));
+  el.innerHTML=sorted.map(([sym,d])=>`<div class="prog-row">
+    <div class="prog-label" style="font-family:'DM Mono',monospace;font-size:10px;">${sym}</div>
+    <div class="prog-track"><div class="prog-fill ${d.pnl>=0?'g':'r'}" style="width:${(Math.abs(d.pnl)/max*100).toFixed(0)}%"></div></div>
+    <div class="prog-val" style="font-size:10px;color:${d.pnl>=0?'#22c55e':'#ef4444'}">${fmtM(d.pnl)}</div>
+  </div>`).join('');
+}
+function drawHourly(trades){
+  const c=document.getElementById('hrChart');if(!c)return;dc('hr');
+  const byHr={};for(let h=8;h<=17;h++)byHr[h]=0;
+  trades.forEach(t=>{const h=t.date.getHours();byHr[h]=(byHr[h]||0)+t.pnl;});
+  const labels=Object.keys(byHr).map(h=>h+':00');const data=Object.values(byHr).map(v=>parseFloat(v.toFixed(2)));
+  charts.hr=new Chart(c,{type:'bar',data:{labels,datasets:[{data,backgroundColor:data.map(v=>v>=0?'#22c55e':'#ef4444'),borderRadius:2}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmt(c.raw)}}},
+    scales:{x:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9}}},y:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9},callback:v=>'$'+v}}}}});
+}
+
+// ─── TRADES VIEW ──────────────────────────────────────────────────────────────
+function renderTradesView(trades){
+  const showAcct=state.selectedAccount==='all';
+  const rows=[...trades].reverse().slice(0,500).map(t=>`<tr>
+    <td>${t.date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'})}</td>
+    <td class="sym">${t.symbol}</td>
+    ${showAcct?`<td><span class="acct-chip" style="background:${t.accountColor}20;color:${t.accountColor}">${t.accountName}</span></td>`:''}
+    <td><span class="pill ${t.side==='Long'?'pill-l':'pill-s'}">${t.side.toUpperCase()}</span></td>
+    <td>${t.qty||1}</td>
+    <td>${t.entry?'$'+t.entry.toFixed(2):'–'}</td>
+    <td>${t.exit?'$'+t.exit.toFixed(2):'–'}</td>
+    <td class="${t.pnl>=0?'tg':'tr'}">${fmt(t.pnl)}</td>
+    <td class="${t.netPnl>=0?'tg':'tr'}">${fmt(t.netPnl)}</td>
+    <td style="color:#374060;">$${t.fees.toFixed(2)}</td>
+  </tr>`).join('');
+  document.getElementById('tradesView').innerHTML=`
+    <div class="filter-bar"><div class="page-title">Trade History</div><div class="spacer"></div><button class="btn btn-ghost" onclick="showImportModal()">↑ Import CSV</button></div>
+    <div class="table-card">
+      <div class="table-head"><div class="table-title">All Trades</div><div style="font-size:10px;color:#374060;">${trades.length} total</div></div>
+      <div style="overflow-x:auto;"><table><thead><tr>
+        <th>Date</th><th>Symbol</th>${showAcct?'<th>Account</th>':''}
+        <th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>Net P&amp;L</th><th>Fees</th>
+      </tr></thead><tbody>${rows}</tbody></table></div>
+    </div>`;
+}
+
+// ─── CALENDAR VIEW ────────────────────────────────────────────────────────────
+function renderCalendarView(trades){
+  const byDay={};trades.forEach(t=>{const k=t.date.toDateString();byDay[k]=(byDay[k]||0)+t.pnl;});
+  const now=new Date(),year=now.getFullYear(),month=now.getMonth();
+  const firstDay=new Date(year,month,1).getDay(),days=new Date(year,month+1,0).getDate();
+  const dh=['Su','Mo','Tu','We','Th','Fr','Sa'];
+  let cal=dh.map(d=>`<div class="cal-dh">${d}</div>`).join('');
+  for(let i=0;i<firstDay;i++)cal+=`<div class="cal-d empty"></div>`;
+  for(let d=1;d<=days;d++){
+    const k=new Date(year,month,d).toDateString(),pnl=byDay[k],today=d===now.getDate();
+    if(pnl!==undefined){
+      cal+=`<div class="cal-d ${pnl>=0?'win':'loss'}${today?' today':''}"><div class="cal-dn">${d}</div><div class="cal-pnl">${pnl>=0?'+':''}${Math.round(pnl)}</div></div>`;
+    } else {
+      cal+=`<div class="cal-d nt${today?' today':''}"><div class="cal-dn">${d}</div></div>`;
+    }
+  }
+  document.getElementById('calendarView').innerHTML=`
+    <div class="filter-bar"><div class="page-title">Calendar</div><div class="chip" style="font-size:12px;padding:4px 10px;">${now.toLocaleDateString('en-US',{month:'long',year:'numeric'})}</div></div>
+    <div class="chart-card"><div class="cal-grid">${cal}</div></div>`;
+}
+
+// ─── ACCOUNTS VIEW ────────────────────────────────────────────────────────────
+function renderAccountsView(){
+  document.getElementById('emptyState').style.display='none';
+  document.getElementById('accountsView').style.display='block';
+  document.getElementById('accountsView').innerHTML=`
+    <div class="filter-bar"><div class="page-title">Manage Accounts</div><div class="spacer"></div><button class="btn btn-primary" onclick="showAddAccount()">+ Add Account</button></div>
+    ${!state.accounts.length?'<div class="empty-state"><div class="empty-icon">🗂</div><div class="empty-title">No accounts yet</div></div>':
+    state.accounts.map(a=>{
+      const t=a.trades,pnl=t.reduce((s,x)=>s+x.netPnl,0),wins=t.filter(x=>x.pnl>0).length;
+      const wr=t.length?(wins/t.length*100).toFixed(1):'–';
+      return`<div class="acct-mgr-row">
+        <div class="account-avatar" style="width:38px;height:38px;border-radius:9px;background:${a.color}20;color:${a.color};font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;">${a.name[0].toUpperCase()}</div>
+        <div class="acct-mgr-info"><div class="acct-mgr-name">${a.name}</div><div class="acct-mgr-meta">${a.type} · ${t.length} trades · Win Rate: ${wr}${wr!=='–'?'%':''}</div></div>
+        <div style="font-family:'DM Mono',monospace;font-size:13px;font-weight:500;color:${pnl>=0?'#22c55e':'#ef4444'};margin-right:12px;">${fmtM(pnl)}</div>
+        <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;" onclick="selectAccount('${a.id}');setTab('dashboard',document.querySelectorAll('.nav-tab')[0])">View</button>
+        <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="showImportForAcct('${a.id}')">↑ Import</button>
+        <button class="btn btn-danger" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="deleteAccount('${a.id}')">Delete</button>
+      </div>`;
+    }).join('')}`;
+}
+
+function showImportForAcct(id){state.selectedAccount=id;showImportModal();setTimeout(()=>document.getElementById('importAcctSelect').value=id,50);}
+function openModal(id){document.getElementById(id).classList.add('open');}
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+function renderColorSwatchesInit(){selectedColor=COLORS[0];renderColorSwatches();}
+
+renderColorSwatchesInit();
+loadData();
+</script>
+</body>
+</html>
