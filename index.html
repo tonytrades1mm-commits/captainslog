@@ -526,71 +526,105 @@ function parseTradovate(text){
 
   // Auto-detect delimiter: tab or comma
   const delim = lines[0].includes('\t') ? '\t' : ',';
-
   const headers=lines[0].split(delim).map(h=>h.trim().replace(/"/g,'').toLowerCase());
   const trades=[];
 
-  // Detect format: Tradovate position history has 'buyprice' / 'sellprice' / 'boughttimestamp'
+  // Detect format: Tradovate position history has 'buyprice' / 'buyfillid'
   const isPositionFormat = headers.includes('buyprice') || headers.includes('boughttimestamp') || headers.includes('buyfillid');
 
+  // Parse currency strings like ($61.00), $80.00, -61.00, 1,250.00
+  function parseMoney(str){
+    if(!str && str!==0) return 0;
+    const s = String(str).trim();
+    // Check for parentheses = negative: ($61.00) → -61.00
+    const isNeg = s.includes('(') || s.startsWith('-');
+    // Strip everything except digits and decimal point
+    const cleaned = s.replace(/[^0-9.]/g,'');
+    const val = parseFloat(cleaned)||0;
+    return isNeg ? -val : val;
+  }
+
+  // Parse dates in multiple formats including M/D/YYYY H:MM
+  function parseDate(str){
+    if(!str) return null;
+    const s = String(str).trim();
+    // Try native parse first
+    const d = new Date(s);
+    if(!isNaN(d.getTime())) return d;
+    // Try M/D/YYYY H:MM format
+    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})/);
+    if(m){
+      return new Date(
+        parseInt(m[3]),   // year
+        parseInt(m[1])-1, // month (0-indexed)
+        parseInt(m[2]),   // day
+        parseInt(m[4]),   // hour
+        parseInt(m[5])    // minute
+      );
+    }
+    return null;
+  }
+
   for(let i=1;i<lines.length;i++){
-    const cols = delim==='\t' ? lines[i].split('\t').map(c=>c.trim().replace(/"/g,'')) : parseRow(lines[i]).map(c=>c.trim().replace(/"/g,''));
-    if(cols.length<3)continue;
+    const cols = delim==='\t'
+      ? lines[i].split('\t').map(c=>c.trim().replace(/"/g,''))
+      : parseRow(lines[i]).map(c=>c.trim().replace(/"/g,''));
+    if(cols.length<3) continue;
     const r={};
     headers.forEach((h,idx)=>r[h]=(cols[idx]||'').trim());
 
-    try {
+    try{
       let pnl, qty, symbol, side, entry, exit, date, fees=0;
 
       if(isPositionFormat){
         // ── Tradovate Position/Trade History format ──────────────────
-        // Columns: symbol, buyFillId, sellFillId, qty, buyPrice,
-        //          sellPrice, pnl, boughtTimestamp, soldTimestamp, duration
+        // Columns: symbol, _priceFormat, _priceFormatType, _tickSize,
+        //          buyFillId, sellFillId, qty, buyPrice, sellPrice,
+        //          pnl, boughtTimestamp, soldTimestamp, duration
         symbol = (r['symbol']||r['contract']||'UNKNOWN').replace(/\s+/g,'');
-        qty    = parseFloat(r['qty']||1);
+        qty    = Math.abs(parseFloat(r['qty']||1));
         entry  = parseFloat(r['buyprice']||0);
         exit   = parseFloat(r['sellprice']||0);
-        pnl    = parseFloat(r['pnl']||0);
-        fees   = 0; // not included in this export format
+        pnl    = parseMoney(r['pnl']);
+        fees   = 0;
 
-        // Determine side: if buyPrice is filled first it's a Long
-        // if sellPrice came first (soldTimestamp < boughtTimestamp) it's a Short
-        const buyTs  = r['boughttimestamp'] ? new Date(r['boughttimestamp']) : null;
-        const sellTs = r['soldtimestamp']   ? new Date(r['soldtimestamp'])   : null;
+        const buyTs  = parseDate(r['boughttimestamp']);
+        const sellTs = parseDate(r['soldtimestamp']);
 
+        // Side: if sell happened before buy → Short trade
         if(buyTs && sellTs && sellTs < buyTs){
           side  = 'Short';
-          // For shorts: entry = sell price, exit = buy price
           entry = parseFloat(r['sellprice']||0);
           exit  = parseFloat(r['buyprice']||0);
           date  = sellTs;
         } else {
           side = 'Long';
-          date = buyTs || new Date();
+          date = buyTs || sellTs || new Date();
         }
 
+        // qty in this format can be negative to indicate direction — use abs
         if(!date || isNaN(date.getTime())) continue;
 
       } else {
         // ── Tradovate Fill/Order History format ──────────────────────
-        pnl    = parseFloat(r['pnl']||r['realized p&l']||r['realizedpnl']||r['net p&l']||r['profit']||0);
-        qty    = parseFloat(r['qty']||r['quantity']||r['filled qty']||1);
+        pnl    = parseMoney(r['pnl']||r['realized p&l']||r['realizedpnl']||r['net p&l']||r['profit']||0);
+        qty    = Math.abs(parseFloat(r['qty']||r['quantity']||r['filled qty']||1));
         symbol = (r['contract']||r['symbol']||r['instrument']||'UNKNOWN').replace(/\s+/g,'');
         const sideRaw = r['side']||r['buy/sell']||r['action']||'Long';
         side   = sideRaw.toLowerCase().includes('sell')||sideRaw.toLowerCase().includes('short')?'Short':'Long';
         entry  = parseFloat(r['avg fill price']||r['entry price']||r['price']||0);
         exit   = parseFloat(r['exit price']||0);
-        fees   = parseFloat(r['commission']||r['fees']||r['commissions']||0);
+        fees   = parseMoney(r['commission']||r['fees']||r['commissions']||0);
         const dateStr = r['fill time']||r['date/time']||r['timestamp']||r['date']||'';
-        date   = dateStr ? new Date(dateStr) : new Date();
-        if(isNaN(date.getTime())) continue;
+        date   = parseDate(dateStr);
+        if(!date||isNaN(date.getTime())) continue;
       }
 
       const netPnl = pnl - Math.abs(fees);
-      trades.push({date, symbol, side, qty, entry, exit, pnl: pnl||0, fees: Math.abs(fees), netPnl});
+      trades.push({date, symbol, side, qty, entry, exit, pnl:pnl||0, fees:Math.abs(fees), netPnl});
 
-    } catch(e) {
-      // skip bad rows silently
+    } catch(e){
+      // skip unparseable rows
     }
   }
   return trades;
