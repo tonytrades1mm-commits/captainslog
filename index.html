@@ -127,13 +127,42 @@ input[type=file]{display:none;}
 .drop-title{font-size:14px;font-weight:500;color:#b0bcd4;margin-bottom:4px;}
 .drop-sub{font-size:12px;color:#374060;}
 .drop-sub span{color:#3b82f6;cursor:pointer;}
-.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
 .cal-dh{font-size:9px;color:#374060;text-align:center;padding:4px;text-transform:uppercase;}
-.cal-d{aspect-ratio:1;border-radius:5px;display:flex;flex-direction:column;align-items:center;justify-content:center;}
-.cal-d.empty{background:transparent;}.cal-d.nt{background:#111520;color:#374060;}
-.cal-d.win{background:#091a10;color:#22c55e;}.cal-d.loss{background:#1a0909;color:#ef4444;}
+.cal-d{aspect-ratio:1;border-radius:7px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;border:1px solid transparent;position:relative;}
+.cal-d.empty{background:transparent;cursor:default;border:none;}
+.cal-d.nt{background:#111520;color:#374060;}
+.cal-d.nt:hover{background:#161b28;border-color:#1e2535;}
+.cal-d.win{background:#091a10;color:#22c55e;}
+.cal-d.win:hover{background:#0d2518;border-color:#22c55e40;}
+.cal-d.loss{background:#1a0909;color:#ef4444;}
+.cal-d.loss:hover{background:#220c0c;border-color:#ef444440;}
 .cal-d.today{outline:1px solid #2563eb;}
-.cal-dn{font-size:8px;opacity:.5;}.cal-pnl{font-size:9px;font-family:'DM Mono',monospace;font-weight:500;}
+.cal-d.selected{outline:2px solid #fff !important;transform:scale(1.05);z-index:2;}
+.cal-dn{font-size:8px;opacity:.5;}
+.cal-pnl{font-size:9px;font-family:'DM Mono',monospace;font-weight:600;}
+.cal-trades{font-size:7px;opacity:.6;margin-top:1px;}
+/* DAY DETAIL PANEL */
+.day-detail{background:#0c0e14;border:1px solid #1a1f2e;border-radius:12px;padding:20px;margin-top:14px;animation:fadeIn .2s ease;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:translateY(0);}}
+.day-detail-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+.day-detail-title{font-size:15px;font-weight:600;color:#fff;}
+.day-detail-close{cursor:pointer;color:#4b5a7a;font-size:18px;line-height:1;padding:2px 6px;border-radius:4px;}
+.day-detail-close:hover{color:#c8d4e8;background:#161b28;}
+.day-stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px;margin-bottom:16px;}
+.day-stat{background:#111520;border-radius:8px;padding:10px 12px;}
+.day-stat-label{font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;}
+.day-stat-val{font-size:15px;font-weight:600;font-family:'DM Mono',monospace;}
+.day-trade-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;font-size:11px;margin-bottom:3px;background:#111520;}
+.day-trade-row:hover{background:#161b28;}
+.day-trade-sym{color:#c8d4e8;font-weight:500;min-width:60px;}
+.day-trade-side{min-width:42px;}
+.day-trade-entry{color:#6b7898;font-family:'DM Mono',monospace;flex:1;}
+.day-trade-pnl{font-family:'DM Mono',monospace;font-weight:600;min-width:70px;text-align:right;}
+/* MONTH NAV */
+.cal-month-nav{display:flex;align-items:center;gap:10px;}
+.cal-nav-btn{width:28px;height:28px;border-radius:6px;border:1px solid #1a1f2e;background:transparent;color:#6b7898;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;transition:all .15s;}
+.cal-nav-btn:hover{background:#161b28;color:#c8d4e8;}
 .sync-bar{display:flex;align-items:center;gap:6px;font-size:11px;color:#4b5a7a;padding:4px 8px;border-radius:5px;}
 .sync-dot{width:6px;height:6px;border-radius:50%;background:#374060;flex-shrink:0;}
 .sync-dot.ok{background:#22c55e;}.sync-dot.syncing{background:#f59e0b;animation:pulse 1s infinite;}.sync-dot.err{background:#ef4444;}
@@ -941,15 +970,149 @@ function renderTradesView(trades){
   document.getElementById('tradesView').innerHTML=`<div class="filter-bar"><div class="page-title">Trade History</div>${renderSelPills()}<div class="spacer"></div><button class="btn btn-ghost" onclick="showImportModal()">↑ Import CSV</button></div><div class="table-card"><div class="table-head"><div class="table-title">All Trades</div><div style="font-size:10px;color:#374060;">${trades.length} total</div></div><div style="overflow-x:auto;"><table><thead><tr><th>Date</th><th>Symbol</th>${showAcct?'<th>Account</th>':''}<th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>Net P&amp;L</th><th>Fees</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
+// Calendar state
+let calYear = new Date().getFullYear();
+let calMonth = new Date().getMonth();
+let calSelectedDay = null;
+let calTrades = [];
+
 function renderCalendarView(trades){
-  const byDay={};trades.forEach(t=>{const k=t.date.toDateString();byDay[k]=(byDay[k]||0)+t.pnl;});
-  const now=new Date(),year=now.getFullYear(),month=now.getMonth();
-  const firstDay=new Date(year,month,1).getDay(),days=new Date(year,month+1,0).getDate();
-  const dh=['Su','Mo','Tu','We','Th','Fr','Sa'];
+  calTrades = trades;
+  calSelectedDay = null;
+  renderCalendar();
+}
+
+function calNav(dir){
+  calMonth += dir;
+  if(calMonth > 11){ calMonth=0; calYear++; }
+  if(calMonth < 0){ calMonth=11; calYear--; }
+  calSelectedDay = null;
+  renderCalendar();
+}
+
+function calClickDay(dateKey, d){
+  calSelectedDay = calSelectedDay === dateKey ? null : dateKey;
+  // Re-render calendar to update selected state
+  renderCalendar(true);
+  // Scroll to detail panel
+  if(calSelectedDay){
+    setTimeout(()=>{
+      const el = document.getElementById('dayDetail');
+      if(el) el.scrollIntoView({behavior:'smooth', block:'nearest'});
+    }, 50);
+  }
+}
+
+function renderCalendar(preserveScroll=false){
+  const trades = calTrades;
+  const now = new Date();
+
+  // Build per-day maps
+  const byDay={};    // dateString → total pnl
+  const tradesByDay={}; // dateString → [trades]
+  trades.forEach(t=>{
+    const k=t.date.toDateString();
+    byDay[k]=(byDay[k]||0)+t.pnl;
+    if(!tradesByDay[k]) tradesByDay[k]=[];
+    tradesByDay[k].push(t);
+  });
+
+  const firstDay = new Date(calYear,calMonth,1).getDay();
+  const daysInMonth = new Date(calYear,calMonth+1,0).getDate();
+  const monthName = new Date(calYear,calMonth,1).toLocaleDateString('en-US',{month:'long',year:'numeric'});
+  const dh=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
   let cal=dh.map(d=>`<div class="cal-dh">${d}</div>`).join('');
-  for(let i=0;i<firstDay;i++)cal+=`<div class="cal-d empty"></div>`;
-  for(let d=1;d<=days;d++){const k=new Date(year,month,d).toDateString(),pnl=byDay[k],today=d===now.getDate();if(pnl!==undefined)cal+=`<div class="cal-d ${pnl>=0?'win':'loss'}${today?' today':''}"><div class="cal-dn">${d}</div><div class="cal-pnl">${pnl>=0?'+':''}${Math.round(pnl)}</div></div>`;else cal+=`<div class="cal-d nt${today?' today':''}"><div class="cal-dn">${d}</div></div>`;}
-  document.getElementById('calendarView').innerHTML=`<div class="filter-bar"><div class="page-title">Calendar</div>${renderSelPills()}<div class="chip" style="font-size:12px;padding:4px 10px;">${now.toLocaleDateString('en-US',{month:'long',year:'numeric'})}</div></div><div class="chart-card"><div class="cal-grid">${cal}</div></div>`;
+  for(let i=0;i<firstDay;i++) cal+=`<div class="cal-d empty"></div>`;
+
+  for(let d=1;d<=daysInMonth;d++){
+    const dateObj = new Date(calYear,calMonth,d);
+    const k = dateObj.toDateString();
+    const pnl = byDay[k];
+    const tcount = (tradesByDay[k]||[]).length;
+    const isToday = d===now.getDate() && calMonth===now.getMonth() && calYear===now.getFullYear();
+    const isSelected = calSelectedDay === k;
+
+    if(pnl !== undefined){
+      const cls = `cal-d ${pnl>=0?'win':'loss'}${isToday?' today':''}${isSelected?' selected':''}`;
+      cal+=`<div class="${cls}" onclick="calClickDay('${k}',${d})">
+        <div class="cal-dn">${d}</div>
+        <div class="cal-pnl">${pnl>=0?'+':''}${Math.abs(pnl)<1000?pnl.toFixed(0):(pnl/1000).toFixed(1)+'k'}</div>
+        <div class="cal-trades">${tcount}t</div>
+      </div>`;
+    } else {
+      const cls = `cal-d nt${isToday?' today':''}${isSelected?' selected':''}`;
+      cal+=`<div class="${cls}" onclick="calClickDay('${k}',${d})">
+        <div class="cal-dn">${d}</div>
+      </div>`;
+    }
+  }
+
+  // Build day detail panel
+  let detailHTML = '';
+  if(calSelectedDay){
+    const dayTrades = tradesByDay[calSelectedDay] || [];
+    const dayPnl = byDay[calSelectedDay] || 0;
+    const dayWins = dayTrades.filter(t=>t.pnl>0);
+    const dayLosses = dayTrades.filter(t=>t.pnl<0);
+    const dayWR = dayTrades.length ? (dayWins.length/dayTrades.length*100).toFixed(0) : 0;
+    const dayAvgWin = dayWins.length ? dayWins.reduce((s,t)=>s+t.pnl,0)/dayWins.length : 0;
+    const dayAvgLoss = dayLosses.length ? dayLosses.reduce((s,t)=>s+t.pnl,0)/dayLosses.length : 0;
+    const dayBest = dayWins.length ? Math.max(...dayWins.map(t=>t.pnl)) : 0;
+    const dayWorst = dayLosses.length ? Math.min(...dayLosses.map(t=>t.pnl)) : 0;
+    const dayFees = dayTrades.reduce((s,t)=>s+t.fees,0);
+    const selectedDate = new Date(calSelectedDay);
+    const dateLabel = selectedDate.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+
+    detailHTML = `<div class="day-detail" id="dayDetail">
+      <div class="day-detail-header">
+        <div class="day-detail-title">${dateLabel}</div>
+        <div class="day-detail-close" onclick="calSelectedDay=null;renderCalendar()">✕</div>
+      </div>
+      <div class="day-stat-row">
+        <div class="day-stat"><div class="day-stat-label">Day P&amp;L</div><div class="day-stat-val" style="color:${dayPnl>=0?'#22c55e':'#ef4444'}">${fmt(dayPnl)}</div></div>
+        <div class="day-stat"><div class="day-stat-label">Trades</div><div class="day-stat-val" style="color:#e2e8f0;">${dayTrades.length}</div></div>
+        <div class="day-stat"><div class="day-stat-label">Win Rate</div><div class="day-stat-val" style="color:${dayWR>=50?'#22c55e':'#ef4444'}">${dayWR}%</div></div>
+        <div class="day-stat"><div class="day-stat-label">Avg Win</div><div class="day-stat-val" style="color:#22c55e;">${dayWins.length?fmt(dayAvgWin):'–'}</div></div>
+        <div class="day-stat"><div class="day-stat-label">Avg Loss</div><div class="day-stat-val" style="color:#ef4444;">${dayLosses.length?fmt(dayAvgLoss):'–'}</div></div>
+        <div class="day-stat"><div class="day-stat-label">Best Trade</div><div class="day-stat-val" style="color:#22c55e;">${dayWins.length?fmt(dayBest):'–'}</div></div>
+        <div class="day-stat"><div class="day-stat-label">Worst Trade</div><div class="day-stat-val" style="color:#ef4444;">${dayLosses.length?fmt(dayWorst):'–'}</div></div>
+        <div class="day-stat"><div class="day-stat-label">Fees Paid</div><div class="day-stat-val" style="color:#6b7898;">$${dayFees.toFixed(2)}</div></div>
+      </div>
+      ${dayTrades.length ? `
+      <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;">Trade Breakdown</div>
+      ${[...dayTrades].sort((a,b)=>a.date-b.date).map(t=>`
+        <div class="day-trade-row">
+          <div class="day-trade-sym">${t.symbol}</div>
+          <div class="day-trade-side"><span class="pill ${t.side==='Long'?'pill-l':'pill-s'}">${t.side.toUpperCase()}</span></div>
+          <div class="day-trade-entry" style="font-family:'DM Mono',monospace;font-size:10px;">
+            ${t.entry?'@'+t.entry.toFixed(2):''}${t.exit?' → '+t.exit.toFixed(2):''} · ${t.qty} ct
+          </div>
+          <div style="font-size:10px;color:#4b5a7a;font-family:'DM Mono',monospace;">
+            ${t.date.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})}
+          </div>
+          <div class="day-trade-pnl" style="color:${t.pnl>=0?'#22c55e':'#ef4444'}">${fmt(t.pnl)}</div>
+        </div>`).join('')}
+      ` : '<div style="color:#4b5a7a;font-size:12px;text-align:center;padding:12px;">No trades on this day</div>'}
+    </div>`;
+  }
+
+  document.getElementById('calendarView').innerHTML=`
+    <div class="filter-bar">
+      <div class="page-title">Calendar</div>
+      ${renderSelPills()}
+      <div class="spacer"></div>
+      <div class="cal-month-nav">
+        <button class="cal-nav-btn" onclick="calNav(-1)">‹</button>
+        <div style="font-size:13px;font-weight:500;color:#c8d4e8;min-width:140px;text-align:center;">${monthName}</div>
+        <button class="cal-nav-btn" onclick="calNav(1)">›</button>
+        <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;margin-left:4px;" onclick="calYear=new Date().getFullYear();calMonth=new Date().getMonth();calSelectedDay=null;renderCalendar()">Today</button>
+      </div>
+    </div>
+    <div class="chart-card">
+      <div class="cal-grid">${cal}</div>
+    </div>
+    ${detailHTML}`;
 }
 
 function renderAccountsView(){
