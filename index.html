@@ -521,23 +521,77 @@ async function processFile(file){
 }
 
 function parseTradovate(text){
-  const lines=text.split('\n').filter(l=>l.trim());if(lines.length<2)return[];
-  const headers=lines[0].split(',').map(h=>h.trim().replace(/"/g,'').toLowerCase());
+  const lines=text.split('\n').filter(l=>l.trim());
+  if(lines.length<2)return[];
+
+  // Auto-detect delimiter: tab or comma
+  const delim = lines[0].includes('\t') ? '\t' : ',';
+
+  const headers=lines[0].split(delim).map(h=>h.trim().replace(/"/g,'').toLowerCase());
   const trades=[];
+
+  // Detect format: Tradovate position history has 'buyprice' / 'sellprice' / 'boughttimestamp'
+  const isPositionFormat = headers.includes('buyprice') || headers.includes('boughttimestamp') || headers.includes('buyfillid');
+
   for(let i=1;i<lines.length;i++){
-    const cols=parseRow(lines[i]);if(cols.length<3)continue;
-    const r={};headers.forEach((h,idx)=>r[h]=(cols[idx]||'').trim().replace(/"/g,''));
-    const pnl=parseFloat(r['pnl']||r['realized p&l']||r['realizedpnl']||r['net p&l']||r['profit']||0);
-    const qty=parseFloat(r['qty']||r['quantity']||r['filled qty']||1);
-    const symbol=(r['contract']||r['symbol']||r['instrument']||'UNKNOWN').replace(/\s+/g,'');
-    const side=r['side']||r['buy/sell']||r['action']||'Long';
-    const entry=parseFloat(r['avg fill price']||r['entry price']||r['price']||0);
-    const exit=parseFloat(r['exit price']||0);
-    const fees=parseFloat(r['commission']||r['fees']||r['commissions']||0);
-    const dateStr=r['fill time']||r['date/time']||r['timestamp']||r['date']||'';
-    const date=dateStr?new Date(dateStr):new Date();if(isNaN(date.getTime()))continue;
-    const isSide=side.toLowerCase().includes('sell')||side.toLowerCase().includes('short')?'Short':'Long';
-    trades.push({date,symbol,side:isSide,qty,entry,exit,pnl:pnl||0,fees:Math.abs(fees),netPnl:(pnl||0)-Math.abs(fees)});
+    const cols = delim==='\t' ? lines[i].split('\t').map(c=>c.trim().replace(/"/g,'')) : parseRow(lines[i]).map(c=>c.trim().replace(/"/g,''));
+    if(cols.length<3)continue;
+    const r={};
+    headers.forEach((h,idx)=>r[h]=(cols[idx]||'').trim());
+
+    try {
+      let pnl, qty, symbol, side, entry, exit, date, fees=0;
+
+      if(isPositionFormat){
+        // ── Tradovate Position/Trade History format ──────────────────
+        // Columns: symbol, buyFillId, sellFillId, qty, buyPrice,
+        //          sellPrice, pnl, boughtTimestamp, soldTimestamp, duration
+        symbol = (r['symbol']||r['contract']||'UNKNOWN').replace(/\s+/g,'');
+        qty    = parseFloat(r['qty']||1);
+        entry  = parseFloat(r['buyprice']||0);
+        exit   = parseFloat(r['sellprice']||0);
+        pnl    = parseFloat(r['pnl']||0);
+        fees   = 0; // not included in this export format
+
+        // Determine side: if buyPrice is filled first it's a Long
+        // if sellPrice came first (soldTimestamp < boughtTimestamp) it's a Short
+        const buyTs  = r['boughttimestamp'] ? new Date(r['boughttimestamp']) : null;
+        const sellTs = r['soldtimestamp']   ? new Date(r['soldtimestamp'])   : null;
+
+        if(buyTs && sellTs && sellTs < buyTs){
+          side  = 'Short';
+          // For shorts: entry = sell price, exit = buy price
+          entry = parseFloat(r['sellprice']||0);
+          exit  = parseFloat(r['buyprice']||0);
+          date  = sellTs;
+        } else {
+          side = 'Long';
+          date = buyTs || new Date();
+        }
+
+        if(!date || isNaN(date.getTime())) continue;
+
+      } else {
+        // ── Tradovate Fill/Order History format ──────────────────────
+        pnl    = parseFloat(r['pnl']||r['realized p&l']||r['realizedpnl']||r['net p&l']||r['profit']||0);
+        qty    = parseFloat(r['qty']||r['quantity']||r['filled qty']||1);
+        symbol = (r['contract']||r['symbol']||r['instrument']||'UNKNOWN').replace(/\s+/g,'');
+        const sideRaw = r['side']||r['buy/sell']||r['action']||'Long';
+        side   = sideRaw.toLowerCase().includes('sell')||sideRaw.toLowerCase().includes('short')?'Short':'Long';
+        entry  = parseFloat(r['avg fill price']||r['entry price']||r['price']||0);
+        exit   = parseFloat(r['exit price']||0);
+        fees   = parseFloat(r['commission']||r['fees']||r['commissions']||0);
+        const dateStr = r['fill time']||r['date/time']||r['timestamp']||r['date']||'';
+        date   = dateStr ? new Date(dateStr) : new Date();
+        if(isNaN(date.getTime())) continue;
+      }
+
+      const netPnl = pnl - Math.abs(fees);
+      trades.push({date, symbol, side, qty, entry, exit, pnl: pnl||0, fees: Math.abs(fees), netPnl});
+
+    } catch(e) {
+      // skip bad rows silently
+    }
   }
   return trades;
 }
