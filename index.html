@@ -139,9 +139,9 @@ input[type=file]{display:none;}
 .cal-d.loss:hover{background:#220c0c;border-color:#ef444440;}
 .cal-d.today{outline:1px solid #2563eb;}
 .cal-d.selected{outline:2px solid #fff !important;transform:scale(1.05);z-index:2;}
-.cal-dn{font-size:8px;opacity:.5;}
-.cal-pnl{font-size:9px;font-family:'DM Mono',monospace;font-weight:600;}
-.cal-trades{font-size:7px;opacity:.6;margin-top:1px;}
+.cal-dn{font-size:9px;opacity:.5;margin-bottom:2px;}
+.cal-pnl{font-size:13px;font-family:'DM Mono',monospace;font-weight:700;letter-spacing:-.3px;}
+.cal-trades{font-size:8px;opacity:.55;margin-top:2px;}
 /* DAY DETAIL PANEL */
 .day-detail{background:#0c0e14;border:1px solid #1a1f2e;border-radius:12px;padding:20px;margin-top:14px;animation:fadeIn .2s ease;}
 @keyframes fadeIn{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:translateY(0);}}
@@ -157,12 +157,18 @@ input[type=file]{display:none;}
 .day-trade-row:hover{background:#161b28;}
 .day-trade-sym{color:#c8d4e8;font-weight:500;min-width:60px;}
 .day-trade-side{min-width:42px;}
-.day-trade-entry{color:#6b7898;font-family:'DM Mono',monospace;flex:1;}
 .day-trade-pnl{font-family:'DM Mono',monospace;font-weight:600;min-width:70px;text-align:right;}
 /* MONTH NAV */
 .cal-month-nav{display:flex;align-items:center;gap:10px;}
 .cal-nav-btn{width:28px;height:28px;border-radius:6px;border:1px solid #1a1f2e;background:transparent;color:#6b7898;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;transition:all .15s;}
 .cal-nav-btn:hover{background:#161b28;color:#c8d4e8;}
+/* CALENDAR ACCOUNT SELECTOR */
+.cal-acct-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:14px;padding:12px 14px;background:#0c0e14;border:1px solid #1a1f2e;border-radius:10px;}
+.cal-acct-label{font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-right:4px;white-space:nowrap;}
+.cal-acct-btn{display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;font-size:11px;font-family:'DM Sans',sans-serif;cursor:pointer;border:1px solid #1a1f2e;background:transparent;color:#6b7898;transition:all .15s;white-space:nowrap;}
+.cal-acct-btn:hover{background:#161b28;color:#c8d4e8;}
+.cal-acct-btn.active{color:#fff;border-color:transparent;}
+.cal-acct-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
 .sync-bar{display:flex;align-items:center;gap:6px;font-size:11px;color:#4b5a7a;padding:4px 8px;border-radius:5px;}
 .sync-dot{width:6px;height:6px;border-radius:50%;background:#374060;flex-shrink:0;}
 .sync-dot.ok{background:#22c55e;}.sync-dot.syncing{background:#f59e0b;animation:pulse 1s infinite;}.sync-dot.err{background:#ef4444;}
@@ -971,14 +977,17 @@ function renderTradesView(trades){
 }
 
 // Calendar state
+// Calendar state
 let calYear = new Date().getFullYear();
 let calMonth = new Date().getMonth();
 let calSelectedDay = null;
-let calTrades = [];
+let calAllTrades = [];       // all trades passed in from active selection
+let calAccountFilter = 'all'; // 'all' or a specific account id
 
 function renderCalendarView(trades){
-  calTrades = trades;
+  calAllTrades = trades;
   calSelectedDay = null;
+  calAccountFilter = 'all';
   renderCalendar();
 }
 
@@ -990,11 +999,15 @@ function calNav(dir){
   renderCalendar();
 }
 
-function calClickDay(dateKey, d){
+function calSetAccount(id){
+  calAccountFilter = id;
+  calSelectedDay = null;
+  renderCalendar();
+}
+
+function calClickDay(dateKey){
   calSelectedDay = calSelectedDay === dateKey ? null : dateKey;
-  // Re-render calendar to update selected state
   renderCalendar(true);
-  // Scroll to detail panel
   if(calSelectedDay){
     setTimeout(()=>{
       const el = document.getElementById('dayDetail');
@@ -1004,12 +1017,16 @@ function calClickDay(dateKey, d){
 }
 
 function renderCalendar(preserveScroll=false){
-  const trades = calTrades;
   const now = new Date();
 
+  // Filter trades by selected account
+  const trades = calAccountFilter === 'all'
+    ? calAllTrades
+    : calAllTrades.filter(t => t.accountId === calAccountFilter);
+
   // Build per-day maps
-  const byDay={};    // dateString → total pnl
-  const tradesByDay={}; // dateString → [trades]
+  const byDay={};
+  const tradesByDay={};
   trades.forEach(t=>{
     const k=t.date.toDateString();
     byDay[k]=(byDay[k]||0)+t.pnl;
@@ -1022,6 +1039,27 @@ function renderCalendar(preserveScroll=false){
   const monthName = new Date(calYear,calMonth,1).toLocaleDateString('en-US',{month:'long',year:'numeric'});
   const dh=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
+  // Build account selector buttons
+  const activeAccounts = getActiveAccounts();
+  const showAcctSelector = activeAccounts.length > 1;
+  let acctBar = '';
+  if(showAcctSelector){
+    const allActive = calAccountFilter === 'all';
+    acctBar = `<div class="cal-acct-bar">
+      <span class="cal-acct-label">Showing:</span>
+      <button class="cal-acct-btn${allActive?' active':''}" style="${allActive?'background:#1a2035;':''}" onclick="calSetAccount('all')">
+        <div class="cal-acct-dot" style="background:#3b82f6;"></div>All Accounts
+      </button>
+      ${activeAccounts.map(a=>{
+        const isActive = calAccountFilter === a.id;
+        return `<button class="cal-acct-btn${isActive?' active':''}" style="${isActive?`background:${a.color}20;border-color:${a.color}40;color:${a.color};`:''}" onclick="calSetAccount('${a.id}')">
+          <div class="cal-acct-dot" style="background:${a.color};"></div>${a.name}
+        </button>`;
+      }).join('')}
+    </div>`;
+  }
+
+  // Build calendar grid
   let cal=dh.map(d=>`<div class="cal-dh">${d}</div>`).join('');
   for(let i=0;i<firstDay;i++) cal+=`<div class="cal-d empty"></div>`;
 
@@ -1034,15 +1072,16 @@ function renderCalendar(preserveScroll=false){
     const isSelected = calSelectedDay === k;
 
     if(pnl !== undefined){
-      const cls = `cal-d ${pnl>=0?'win':'loss'}${isToday?' today':''}${isSelected?' selected':''}`;
-      cal+=`<div class="${cls}" onclick="calClickDay('${k}',${d})">
+      const cls=`cal-d ${pnl>=0?'win':'loss'}${isToday?' today':''}${isSelected?' selected':''}`;
+      const pnlLabel = Math.abs(pnl)<1000 ? (pnl>=0?'+':'')+pnl.toFixed(0) : (pnl>=0?'+':'-')+(Math.abs(pnl)/1000).toFixed(1)+'k';
+      cal+=`<div class="${cls}" onclick="calClickDay('${k}')">
         <div class="cal-dn">${d}</div>
-        <div class="cal-pnl">${pnl>=0?'+':''}${Math.abs(pnl)<1000?pnl.toFixed(0):(pnl/1000).toFixed(1)+'k'}</div>
-        <div class="cal-trades">${tcount}t</div>
+        <div class="cal-pnl">${pnlLabel}</div>
+        <div class="cal-trades">${tcount} trade${tcount!==1?'s':''}</div>
       </div>`;
     } else {
-      const cls = `cal-d nt${isToday?' today':''}${isSelected?' selected':''}`;
-      cal+=`<div class="${cls}" onclick="calClickDay('${k}',${d})">
+      const cls=`cal-d nt${isToday?' today':''}${isSelected?' selected':''}`;
+      cal+=`<div class="${cls}" onclick="calClickDay('${k}')">
         <div class="cal-dn">${d}</div>
       </div>`;
     }
@@ -1051,26 +1090,28 @@ function renderCalendar(preserveScroll=false){
   // Build day detail panel
   let detailHTML = '';
   if(calSelectedDay){
-    const dayTrades = tradesByDay[calSelectedDay] || [];
-    const dayPnl = byDay[calSelectedDay] || 0;
+    const dayTrades = (tradesByDay[calSelectedDay]||[]).sort((a,b)=>a.date-b.date);
+    const dayPnl = byDay[calSelectedDay]||0;
     const dayWins = dayTrades.filter(t=>t.pnl>0);
     const dayLosses = dayTrades.filter(t=>t.pnl<0);
-    const dayWR = dayTrades.length ? (dayWins.length/dayTrades.length*100).toFixed(0) : 0;
-    const dayAvgWin = dayWins.length ? dayWins.reduce((s,t)=>s+t.pnl,0)/dayWins.length : 0;
-    const dayAvgLoss = dayLosses.length ? dayLosses.reduce((s,t)=>s+t.pnl,0)/dayLosses.length : 0;
-    const dayBest = dayWins.length ? Math.max(...dayWins.map(t=>t.pnl)) : 0;
-    const dayWorst = dayLosses.length ? Math.min(...dayLosses.map(t=>t.pnl)) : 0;
+    const dayWR = dayTrades.length?(dayWins.length/dayTrades.length*100).toFixed(0):0;
+    const dayAvgWin = dayWins.length?dayWins.reduce((s,t)=>s+t.pnl,0)/dayWins.length:0;
+    const dayAvgLoss = dayLosses.length?dayLosses.reduce((s,t)=>s+t.pnl,0)/dayLosses.length:0;
+    const dayBest = dayWins.length?Math.max(...dayWins.map(t=>t.pnl)):0;
+    const dayWorst = dayLosses.length?Math.min(...dayLosses.map(t=>t.pnl)):0;
     const dayFees = dayTrades.reduce((s,t)=>s+t.fees,0);
-    const selectedDate = new Date(calSelectedDay);
-    const dateLabel = selectedDate.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+    const dayNetPnl = dayTrades.reduce((s,t)=>s+t.netPnl,0);
+    const dateLabel = new Date(calSelectedDay).toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+    const showAcctCol = calAccountFilter==='all' && activeAccounts.length>1;
 
-    detailHTML = `<div class="day-detail" id="dayDetail">
+    detailHTML=`<div class="day-detail" id="dayDetail">
       <div class="day-detail-header">
         <div class="day-detail-title">${dateLabel}</div>
         <div class="day-detail-close" onclick="calSelectedDay=null;renderCalendar()">✕</div>
       </div>
       <div class="day-stat-row">
-        <div class="day-stat"><div class="day-stat-label">Day P&amp;L</div><div class="day-stat-val" style="color:${dayPnl>=0?'#22c55e':'#ef4444'}">${fmt(dayPnl)}</div></div>
+        <div class="day-stat"><div class="day-stat-label">Gross P&amp;L</div><div class="day-stat-val" style="color:${dayPnl>=0?'#22c55e':'#ef4444'}">${fmt(dayPnl)}</div></div>
+        <div class="day-stat"><div class="day-stat-label">Net P&amp;L</div><div class="day-stat-val" style="color:${dayNetPnl>=0?'#22c55e':'#ef4444'}">${fmt(dayNetPnl)}</div></div>
         <div class="day-stat"><div class="day-stat-label">Trades</div><div class="day-stat-val" style="color:#e2e8f0;">${dayTrades.length}</div></div>
         <div class="day-stat"><div class="day-stat-label">Win Rate</div><div class="day-stat-val" style="color:${dayWR>=50?'#22c55e':'#ef4444'}">${dayWR}%</div></div>
         <div class="day-stat"><div class="day-stat-label">Avg Win</div><div class="day-stat-val" style="color:#22c55e;">${dayWins.length?fmt(dayAvgWin):'–'}</div></div>
@@ -1079,28 +1120,28 @@ function renderCalendar(preserveScroll=false){
         <div class="day-stat"><div class="day-stat-label">Worst Trade</div><div class="day-stat-val" style="color:#ef4444;">${dayLosses.length?fmt(dayWorst):'–'}</div></div>
         <div class="day-stat"><div class="day-stat-label">Fees Paid</div><div class="day-stat-val" style="color:#6b7898;">$${dayFees.toFixed(2)}</div></div>
       </div>
-      ${dayTrades.length ? `
-      <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;">Trade Breakdown</div>
-      ${[...dayTrades].sort((a,b)=>a.date-b.date).map(t=>`
-        <div class="day-trade-row">
-          <div class="day-trade-sym">${t.symbol}</div>
-          <div class="day-trade-side"><span class="pill ${t.side==='Long'?'pill-l':'pill-s'}">${t.side.toUpperCase()}</span></div>
-          <div class="day-trade-entry" style="font-family:'DM Mono',monospace;font-size:10px;">
-            ${t.entry?'@'+t.entry.toFixed(2):''}${t.exit?' → '+t.exit.toFixed(2):''} · ${t.qty} ct
-          </div>
-          <div style="font-size:10px;color:#4b5a7a;font-family:'DM Mono',monospace;">
-            ${t.date.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})}
-          </div>
-          <div class="day-trade-pnl" style="color:${t.pnl>=0?'#22c55e':'#ef4444'}">${fmt(t.pnl)}</div>
-        </div>`).join('')}
-      ` : '<div style="color:#4b5a7a;font-size:12px;text-align:center;padding:12px;">No trades on this day</div>'}
+      ${dayTrades.length?`
+        <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;">Trade Breakdown</div>
+        ${dayTrades.map(t=>`
+          <div class="day-trade-row">
+            <div class="day-trade-sym">${t.symbol}</div>
+            <div class="day-trade-side"><span class="pill ${t.side==='Long'?'pill-l':'pill-s'}">${t.side.toUpperCase()}</span></div>
+            ${showAcctCol?`<div><span class="acct-chip" style="background:${t.accountColor}20;color:${t.accountColor}">${t.accountName}</span></div>`:''}
+            <div style="flex:1;font-family:'DM Mono',monospace;font-size:10px;color:#6b7898;">
+              ${t.entry?'@'+t.entry.toFixed(2):''}${t.exit&&t.exit>0?' → '+t.exit.toFixed(2):''} · ${t.qty} ct
+            </div>
+            <div style="font-size:10px;color:#4b5a7a;font-family:'DM Mono',monospace;min-width:60px;text-align:right;">
+              ${t.date.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})}
+            </div>
+            <div class="day-trade-pnl" style="color:${t.pnl>=0?'#22c55e':'#ef4444'}">${fmt(t.pnl)}</div>
+          </div>`).join('')}
+      `:`<div style="color:#4b5a7a;font-size:12px;text-align:center;padding:16px;">No trades on this day</div>`}
     </div>`;
   }
 
   document.getElementById('calendarView').innerHTML=`
     <div class="filter-bar">
       <div class="page-title">Calendar</div>
-      ${renderSelPills()}
       <div class="spacer"></div>
       <div class="cal-month-nav">
         <button class="cal-nav-btn" onclick="calNav(-1)">‹</button>
@@ -1109,9 +1150,8 @@ function renderCalendar(preserveScroll=false){
         <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;margin-left:4px;" onclick="calYear=new Date().getFullYear();calMonth=new Date().getMonth();calSelectedDay=null;renderCalendar()">Today</button>
       </div>
     </div>
-    <div class="chart-card">
-      <div class="cal-grid">${cal}</div>
-    </div>
+    ${acctBar}
+    <div class="chart-card"><div class="cal-grid">${cal}</div></div>
     ${detailHTML}`;
 }
 
