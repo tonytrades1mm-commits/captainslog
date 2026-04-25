@@ -1335,7 +1335,11 @@ function renderDashboard(trades){
             const hasBal=bal!==null;
             const currentVal=hasBal?bal:a.trades.reduce((s,t)=>s+t.pnl,0);
             const goal=a.profit_goal;
-            const pct=Math.min(100,Math.max(0,(currentVal/goal)*100));
+            const startBal=a.starting_balance||0;
+            // Progress = profit made / profit needed (0% to 100%)
+            const profitMade=hasBal?currentVal-startBal:currentVal;
+            const profitNeeded=hasBal?goal-startBal:goal;
+            const pct=profitNeeded>0?Math.min(100,Math.max(0,(profitMade/profitNeeded)*100)):0;
             const achieved=currentVal>=goal;
             const remaining=goal-currentVal;
             const fillColor=achieved?'#f59e0b':pct>75?'#22c55e':pct>40?'#3b82f6':'#6b7898';
@@ -1352,12 +1356,18 @@ function renderDashboard(trades){
               <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px;">
                 <div style="font-size:16px;font-weight:600;font-family:'DM Mono',monospace;color:${valColor};">${fmtC(currentVal)}</div>
                 <div style="font-size:11px;color:#374060;">/ ${fmtC(goal)}</div>
-                <div style="font-size:10px;color:#4b5a7a;margin-left:auto;">${pct.toFixed(1)}%</div>
+                <div style="font-size:10px;color:#4b5a7a;margin-left:auto;">${pct.toFixed(1)}% of profit target</div>
               </div>
               ${!hasBal?`<div style="font-size:10px;color:#f59e0b;margin-bottom:6px;">⚠ Set a Starting Balance for balance-based tracking</div>`:''}
-              <!-- Progress bar -->
-              <div style="height:10px;background:#161b28;border-radius:5px;overflow:hidden;margin-bottom:10px;">
-                <div style="height:100%;width:${pct.toFixed(1)}%;background:${fillColor};border-radius:5px;transition:width .5s;${achieved?'box-shadow:0 0 8px #f59e0b60':''}"></div>
+              <!-- Progress bar: 0% = starting balance, 100% = goal balance -->
+              <div style="position:relative;margin-bottom:10px;">
+                <div style="height:10px;background:#161b28;border-radius:5px;overflow:hidden;">
+                  <div style="height:100%;width:${pct.toFixed(1)}%;background:${fillColor};border-radius:5px;transition:width .5s;${achieved?'box-shadow:0 0 8px #f59e0b60':''}"></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:9px;color:#374060;margin-top:3px;">
+                  <span>${hasBal?fmtC(startBal):'$0'}</span>
+                  <span>${fmtC(goal)}</span>
+                </div>
               </div>
               <!-- BIG "balance needed" -->
               <div style="display:flex;align-items:baseline;justify-content:flex-end;">
