@@ -980,37 +980,87 @@ function renderDashCal(trades){
   const daysInMonth=new Date(dashCalYear,dashCalMonth+1,0).getDate();
   const dh=['Su','Mo','Tu','We','Th','Fr','Sa'];
 
-  // Mini calendar uses smaller cells — inline grid style
-  let html=`<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;">`;
-  html+=dh.map(d=>`<div style="font-size:9px;color:#374060;text-align:center;padding:3px;text-transform:uppercase;">${d}</div>`).join('');
-  for(let i=0;i<firstDay;i++) html+=`<div></div>`;
+  const cellStyle=`display:flex;flex-direction:column;align-items:center;justify-content:center;height:64px;border-radius:6px;text-align:center;cursor:pointer;transition:all .15s;`;
+  const weekTotalStyle=`display:flex;flex-direction:column;align-items:center;justify-content:center;height:64px;border-radius:6px;text-align:center;border:1px solid #1e2535;background:#0a0c11;`;
 
-  for(let d=1;d<=daysInMonth;d++){
-    const dateObj=new Date(dashCalYear,dashCalMonth,d);
+  // 8 columns: Sun Mon Tue Wed Thu Fri Sat | Week Total
+  let html=`<div style="display:grid;grid-template-columns:repeat(7,1fr) 80px;gap:4px;">`;
+
+  // Header row
+  html+=dh.map(d=>`<div style="font-size:9px;color:#374060;text-align:center;padding:4px 0 6px;text-transform:uppercase;">${d}</div>`).join('');
+  html+=`<div style="font-size:9px;color:#2563eb;text-align:center;padding:4px 0 6px;text-transform:uppercase;font-weight:500;">Week</div>`;
+
+  // Build weeks: each row is Sun–Sat + weekly total
+  let currentDay = 1;
+  let weekCol = 0; // which column of the week we're on (0=Sun ... 6=Sat)
+
+  // First row — pad empty cells before month start
+  let weekPnl = 0;
+  let weekHasTrades = false;
+
+  // We'll render row by row
+  // First fill empty cells at start
+  for(let i=0;i<firstDay;i++){
+    html+=`<div style="height:64px;"></div>`;
+    weekCol++;
+  }
+
+  while(currentDay<=daysInMonth){
+    const dateObj=new Date(dashCalYear,dashCalMonth,currentDay);
     const k=dateObj.toDateString();
     const pnl=byDay[k];
     const tcount=countByDay[k]||0;
-    const isToday=d===now.getDate()&&dashCalMonth===now.getMonth()&&dashCalYear===now.getFullYear();
+    const isToday=currentDay===now.getDate()&&dashCalMonth===now.getMonth()&&dashCalYear===now.getFullYear();
+    const todayStyle=isToday?`outline:2px solid #2563eb;outline-offset:-1px;`:'';
 
     if(pnl!==undefined){
+      weekPnl+=pnl;
+      weekHasTrades=true;
       const bg=pnl>=0?'#091a10':'#1a0909';
       const color=pnl>=0?'#22c55e':'#ef4444';
-      const outline=isToday?`outline:1px solid #2563eb;`:'';
       const pnlLabel=Math.abs(pnl)<1000?(pnl>=0?'+':'')+pnl.toFixed(0):(pnl>=0?'+':'-')+(Math.abs(pnl)/1000).toFixed(1)+'k';
-      html+=`<div style="background:${bg};border-radius:5px;padding:4px 2px;text-align:center;cursor:pointer;${outline}"
-        onclick="dashCalClickDay('${k}')" title="${k}: ${fmt(pnl)} (${tcount} trades)">
-        <div style="font-size:8px;color:${color};opacity:.5;">${d}</div>
-        <div style="font-size:11px;font-family:'DM Mono',monospace;font-weight:700;color:${color};line-height:1.2;">${pnlLabel}</div>
-        <div style="font-size:7px;color:${color};opacity:.55;">${tcount}t</div>
+      html+=`<div style="background:${bg};${cellStyle}${todayStyle}"
+        onclick="dashCalClickDay('${k}')" title="${k}: ${fmt(pnl)} (${tcount} trade${tcount!==1?'s':''})">
+        <div style="font-size:9px;color:${color};opacity:.5;margin-bottom:2px;">${currentDay}</div>
+        <div style="font-size:12px;font-family:'DM Mono',monospace;font-weight:700;color:${color};line-height:1.2;">${pnlLabel}</div>
+        <div style="font-size:8px;color:${color};opacity:.55;margin-top:2px;">${tcount}t</div>
       </div>`;
     } else {
-      const outline=isToday?`outline:1px solid #2563eb;`:'';
-      html+=`<div style="background:#111520;border-radius:5px;padding:4px 2px;text-align:center;cursor:pointer;${outline}"
+      html+=`<div style="background:#111520;${cellStyle}${todayStyle}"
         onclick="dashCalClickDay('${k}')" title="${dateObj.toLocaleDateString('en-US',{month:'short',day:'numeric'})}">
-        <div style="font-size:8px;color:#374060;">${d}</div>
+        <div style="font-size:9px;color:#374060;">${currentDay}</div>
       </div>`;
     }
+
+    weekCol++;
+
+    // End of week (Saturday) or end of month → emit weekly total
+    if(weekCol===7||currentDay===daysInMonth){
+      // Pad remaining cells if end of month mid-week
+      if(currentDay===daysInMonth && weekCol<7){
+        for(let p=weekCol;p<7;p++) html+=`<div style="height:64px;"></div>`;
+      }
+      // Weekly total cell
+      if(weekHasTrades){
+        const wc=weekPnl>=0?'#22c55e':'#ef4444';
+        const wbg=weekPnl>=0?'rgba(34,197,94,0.07)':'rgba(239,68,68,0.07)';
+        const wLabel=Math.abs(weekPnl)<1000?(weekPnl>=0?'+':'')+weekPnl.toFixed(0):(weekPnl>=0?'+':'-')+(Math.abs(weekPnl)/1000).toFixed(1)+'k';
+        html+=`<div style="${weekTotalStyle}background:${wbg};border-color:${wc}30;">
+          <div style="font-size:8px;color:${wc};opacity:.6;margin-bottom:2px;text-transform:uppercase;letter-spacing:.5px;">Week</div>
+          <div style="font-size:12px;font-family:'DM Mono',monospace;font-weight:700;color:${wc};">${wLabel}</div>
+        </div>`;
+      } else {
+        html+=`<div style="${weekTotalStyle}"><div style="font-size:9px;color:#1e2535;">–</div></div>`;
+      }
+      // Reset for next week
+      weekPnl=0;
+      weekHasTrades=false;
+      weekCol=0;
+    }
+
+    currentDay++;
   }
+
   html+=`</div>`;
 
   // Monthly summary row
