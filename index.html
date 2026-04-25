@@ -923,13 +923,122 @@ function renderDashboard(trades){
     <div class="g2">
       <div class="chart-card"><div class="chart-head"><span class="chart-title">Top Symbols</span></div><div id="symBreak"></div></div>
       <div class="chart-card"><div class="chart-head"><span class="chart-title">P&amp;L by Hour</span></div><div style="position:relative;height:170px;"><canvas id="hrChart" role="img" aria-label="Hourly PnL">Hourly</canvas></div></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-head">
+        <span class="chart-title">Monthly Calendar</span>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <button class="cal-nav-btn" onclick="dashCalNav(-1)">‹</button>
+          <span style="font-size:11px;color:#6b7898;min-width:100px;text-align:center;" id="dashCalMonthLabel"></span>
+          <button class="cal-nav-btn" onclick="dashCalNav(1)">›</button>
+          <button class="btn btn-ghost" style="font-size:10px;padding:3px 8px;" onclick="dashCalYear=new Date().getFullYear();dashCalMonth=new Date().getMonth();renderDashCal(dashCalTrades)">Today</button>
+          <span style="cursor:pointer;font-size:11px;color:#3b82f6;padding:3px 8px;" onclick="setTab('calendar',document.querySelectorAll('.nav-tab')[4])">Full Calendar →</span>
+        </div>
+      </div>
+      <div id="dashCalGrid"></div>
     </div>`;
-  setTimeout(()=>{drawEquity(trades);drawDaily(trades);drawWL(wins.length,losses.length);drawSymbols(trades);drawHourly(trades);},50);
+  setTimeout(()=>{drawEquity(trades);drawDaily(trades);drawWL(wins.length,losses.length);drawSymbols(trades);drawHourly(trades);renderDashCal(trades);},50);
 }
 
 function renderSelBreakdown(){
   const active=getActiveAccounts();if(active.length<=1)return'';
   return`<div style="border-top:1px solid #1a1f2e;margin-top:14px;padding-top:12px;"><div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;">Selected Accounts</div>${active.map(a=>{const pnl=a.trades.reduce((s,t)=>s+t.netPnl,0);return`<div style="display:flex;align-items:center;gap:6px;margin-bottom:7px;"><div style="width:8px;height:8px;border-radius:2px;background:${a.color};flex-shrink:0;"></div><div style="font-size:11px;color:#8090b0;flex:1;">${a.name}</div><div style="font-size:11px;font-family:'DM Mono',monospace;color:${pnl>=0?'#22c55e':'#ef4444'}">${fmtM(pnl)}</div></div>`;}).join('')}</div>`;
+}
+
+// ── DASHBOARD MINI CALENDAR ───────────────────────────────────────────────────
+let dashCalYear = new Date().getFullYear();
+let dashCalMonth = new Date().getMonth();
+let dashCalTrades = [];
+
+function dashCalNav(dir){
+  dashCalMonth += dir;
+  if(dashCalMonth>11){dashCalMonth=0;dashCalYear++;}
+  if(dashCalMonth<0){dashCalMonth=11;dashCalYear--;}
+  renderDashCal(dashCalTrades);
+}
+
+function renderDashCal(trades){
+  dashCalTrades = trades;
+  const grid = document.getElementById('dashCalGrid');
+  const label = document.getElementById('dashCalMonthLabel');
+  if(!grid||!label) return;
+
+  const now = new Date();
+  const monthName = new Date(dashCalYear,dashCalMonth,1).toLocaleDateString('en-US',{month:'long',year:'numeric'});
+  label.textContent = monthName;
+
+  // Build day PnL map
+  const byDay={};
+  const countByDay={};
+  trades.forEach(t=>{
+    const k=t.date.toDateString();
+    byDay[k]=(byDay[k]||0)+t.pnl;
+    countByDay[k]=(countByDay[k]||0)+1;
+  });
+
+  const firstDay=new Date(dashCalYear,dashCalMonth,1).getDay();
+  const daysInMonth=new Date(dashCalYear,dashCalMonth+1,0).getDate();
+  const dh=['Su','Mo','Tu','We','Th','Fr','Sa'];
+
+  // Mini calendar uses smaller cells — inline grid style
+  let html=`<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;">`;
+  html+=dh.map(d=>`<div style="font-size:9px;color:#374060;text-align:center;padding:3px;text-transform:uppercase;">${d}</div>`).join('');
+  for(let i=0;i<firstDay;i++) html+=`<div></div>`;
+
+  for(let d=1;d<=daysInMonth;d++){
+    const dateObj=new Date(dashCalYear,dashCalMonth,d);
+    const k=dateObj.toDateString();
+    const pnl=byDay[k];
+    const tcount=countByDay[k]||0;
+    const isToday=d===now.getDate()&&dashCalMonth===now.getMonth()&&dashCalYear===now.getFullYear();
+
+    if(pnl!==undefined){
+      const bg=pnl>=0?'#091a10':'#1a0909';
+      const color=pnl>=0?'#22c55e':'#ef4444';
+      const outline=isToday?`outline:1px solid #2563eb;`:'';
+      const pnlLabel=Math.abs(pnl)<1000?(pnl>=0?'+':'')+pnl.toFixed(0):(pnl>=0?'+':'-')+(Math.abs(pnl)/1000).toFixed(1)+'k';
+      html+=`<div style="background:${bg};border-radius:5px;padding:4px 2px;text-align:center;cursor:pointer;${outline}"
+        onclick="dashCalClickDay('${k}')" title="${k}: ${fmt(pnl)} (${tcount} trades)">
+        <div style="font-size:8px;color:${color};opacity:.5;">${d}</div>
+        <div style="font-size:11px;font-family:'DM Mono',monospace;font-weight:700;color:${color};line-height:1.2;">${pnlLabel}</div>
+        <div style="font-size:7px;color:${color};opacity:.55;">${tcount}t</div>
+      </div>`;
+    } else {
+      const outline=isToday?`outline:1px solid #2563eb;`:'';
+      html+=`<div style="background:#111520;border-radius:5px;padding:4px 2px;text-align:center;cursor:pointer;${outline}"
+        onclick="dashCalClickDay('${k}')" title="${dateObj.toLocaleDateString('en-US',{month:'short',day:'numeric'})}">
+        <div style="font-size:8px;color:#374060;">${d}</div>
+      </div>`;
+    }
+  }
+  html+=`</div>`;
+
+  // Monthly summary row
+  const monthTrades=trades.filter(t=>t.date.getMonth()===dashCalMonth&&t.date.getFullYear()===dashCalYear);
+  const monthPnl=monthTrades.reduce((s,t)=>s+t.pnl,0);
+  const monthWins=monthTrades.filter(t=>t.pnl>0).length;
+  const monthWR=monthTrades.length?(monthWins/monthTrades.length*100).toFixed(0):0;
+  const tradingDays=Object.keys(byDay).filter(k=>{const d=new Date(k);return d.getMonth()===dashCalMonth&&d.getFullYear()===dashCalYear;}).length;
+
+  html+=`<div style="display:flex;gap:16px;margin-top:12px;padding-top:10px;border-top:1px solid #1a1f2e;flex-wrap:wrap;">
+    <div style="font-size:11px;color:#4b5a7a;">Month P&amp;L: <span style="font-family:'DM Mono',monospace;font-weight:600;color:${monthPnl>=0?'#22c55e':'#ef4444'}">${fmt(monthPnl)}</span></div>
+    <div style="font-size:11px;color:#4b5a7a;">Trades: <span style="color:#c8d4e8;">${monthTrades.length}</span></div>
+    <div style="font-size:11px;color:#4b5a7a;">Trading Days: <span style="color:#c8d4e8;">${tradingDays}</span></div>
+    <div style="font-size:11px;color:#4b5a7a;">Win Rate: <span style="color:${monthWR>=50?'#22c55e':'#ef4444'}">${monthWR}%</span></div>
+  </div>`;
+
+  grid.innerHTML=html;
+}
+
+function dashCalClickDay(dateKey){
+  // Switch to calendar tab and select that day
+  calYear=new Date(dateKey).getFullYear();
+  calMonth=new Date(dateKey).getMonth();
+  calSelectedDay=dateKey;
+  calAllTrades=dashCalTrades;
+  calAccountFilter='all';
+  setTab('calendar',document.querySelectorAll('.nav-tab')[4]);
+  setTimeout(()=>renderCalendar(),50);
 }
 
 function dc(k){if(charts[k]){charts[k].destroy();charts[k]=null;}}
