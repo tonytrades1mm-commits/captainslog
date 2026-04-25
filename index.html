@@ -1406,4 +1406,84 @@ function renderCalendar(preserveScroll=false){
         <div class="day-stat"><div class="day-stat-label">Trades</div><div class="day-stat-val" style="color:#e2e8f0;">${dayTrades.length}</div></div>
         <div class="day-stat"><div class="day-stat-label">Win Rate</div><div class="day-stat-val" style="color:${dayWR>=50?'#22c55e':'#ef4444'}">${dayWR}%</div></div>
         <div class="day-stat"><div class="day-stat-label">Avg Win</div><div class="day-stat-val" style="color:#22c55e;">${dayWins.length?fmt(dayAvgWin):'–'}</div></div>
-        <div class="day-stat"><div cla
+        <div class="day-stat"><div class="day-stat-label">Avg Loss</div><div class="day-stat-val" style="color:#ef4444;">${dayLosses.length?fmt(dayAvgLoss):'–'}</div></div>
+        <div class="day-stat"><div class="day-stat-label">Best Trade</div><div class="day-stat-val" style="color:#22c55e;">${dayWins.length?fmt(dayBest):'–'}</div></div>
+        <div class="day-stat"><div class="day-stat-label">Worst Trade</div><div class="day-stat-val" style="color:#ef4444;">${dayLosses.length?fmt(dayWorst):'–'}</div></div>
+        <div class="day-stat"><div class="day-stat-label">Fees Paid</div><div class="day-stat-val" style="color:#6b7898;">$${dayFees.toFixed(2)}</div></div>
+      </div>
+      ${dayTrades.length?`
+        <!-- INTRADAY EQUITY CURVE -->
+        <div style="margin-bottom:16px;">
+          <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:10px;">Intraday P&amp;L Curve</div>
+          <div style="position:relative;height:160px;"><canvas id="intradayChart" role="img" aria-label="Intraday equity curve">Intraday PnL</canvas></div>
+        </div>
+        <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;">Trade Breakdown</div>
+        ${dayTrades.map(t=>`
+          <div class="day-trade-row">
+            <div class="day-trade-sym">${t.symbol}</div>
+            <div class="day-trade-side"><span class="pill ${t.side==='Long'?'pill-l':'pill-s'}">${t.side.toUpperCase()}</span></div>
+            ${showAcctCol?`<div><span class="acct-chip" style="background:${t.accountColor}20;color:${t.accountColor}">${t.accountName}</span></div>`:''}
+            <div style="flex:1;font-family:'DM Mono',monospace;font-size:10px;color:#6b7898;">
+              ${t.entry?'@'+t.entry.toFixed(2):''}${t.exit&&t.exit>0?' → '+t.exit.toFixed(2):''} · ${t.qty} ct
+            </div>
+            <div style="font-size:10px;color:#4b5a7a;font-family:'DM Mono',monospace;min-width:60px;text-align:right;">
+              ${t.date.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})}
+            </div>
+            <div class="day-trade-pnl" style="color:${t.pnl>=0?'#22c55e':'#ef4444'}">${fmt(t.pnl)}</div>
+          </div>`).join('')}
+      `:`<div style="color:#4b5a7a;font-size:12px;text-align:center;padding:16px;">No trades on this day</div>`}
+    </div>`;
+    // Draw intraday chart after HTML is set
+    if(dayTrades.length){
+      setTimeout(()=>drawIntradayChart('intradayChart', dayTrades, activeAccounts),80);
+    }
+  }
+
+  document.getElementById('calendarView').innerHTML=`
+    <div class="filter-bar">
+      <div class="page-title">Calendar</div>
+      <div class="spacer"></div>
+      <div class="cal-month-nav">
+        <button class="cal-nav-btn" onclick="calNav(-1)">‹</button>
+        <div style="font-size:13px;font-weight:500;color:#c8d4e8;min-width:140px;text-align:center;">${monthName}</div>
+        <button class="cal-nav-btn" onclick="calNav(1)">›</button>
+        <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;margin-left:4px;" onclick="calYear=new Date().getFullYear();calMonth=new Date().getMonth();calSelectedDay=null;renderCalendar()">Today</button>
+      </div>
+    </div>
+    ${acctBar}
+    <div class="chart-card"><div class="cal-grid">${cal}</div></div>
+    ${detailHTML}`;
+}
+
+function renderAccountsView(){
+  document.getElementById('emptyState').style.display='none';
+  document.getElementById('accountsView').style.display='block';
+  document.getElementById('accountsView').innerHTML=`<div class="filter-bar"><div class="page-title">Manage Accounts</div><div class="spacer"></div><button class="btn btn-primary" onclick="showAddAccount()">+ Add Account</button></div>${!state.accounts.length?'<div class="empty-state"><div class="empty-icon">🗂</div><div class="empty-title">No accounts yet</div></div>':state.accounts.map(a=>{
+    const t=a.trades,pnl=t.reduce((s,x)=>s+x.netPnl,0),wins=t.filter(x=>x.pnl>0).length;
+    const wr=t.length?(wins/t.length*100).toFixed(1):'–';
+    const dd=calcTrailingDD(a);
+    const isBlown=dd&&dd.blown;
+    return`<div class="acct-mgr-row${isBlown?' blown':''}">
+      <div style="width:38px;height:38px;border-radius:9px;background:${a.color}20;color:${a.color};font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${a.name[0].toUpperCase()}</div>
+      <div class="acct-mgr-info">
+        <div class="acct-mgr-name">${a.name}${isBlown?'<span style="font-size:10px;background:#2b0808;color:#ef4444;padding:2px 6px;border-radius:4px;font-weight:500;">BLOWN</span>':''}</div>
+        <div class="acct-mgr-meta">${a.type} · ${t.length} trades · WR: ${wr}${wr!=='–'?'%':''}${dd?` · Floor: ${fmtC(dd.currentFloor)} · Buffer: ${fmtC(dd.distanceToFloor)}`:''}</div>
+      </div>
+      <div style="font-family:'DM Mono',monospace;font-size:13px;font-weight:500;color:${pnl>=0?'#22c55e':'#ef4444'};margin-right:8px;">${fmtM(pnl)}</div>
+      <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;" onclick="soloAccount('${a.id}');setTab('dashboard',document.querySelectorAll('.nav-tab')[0])">View</button>
+      <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="showEditDD('${a.id}')">DD Settings</button>
+      <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="showImportForAcct('${a.id}')">↑ Import</button>
+      <button class="btn btn-danger" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="deleteAccount('${a.id}')">Delete</button>
+    </div>`;
+  }).join('')}`;
+}
+
+function showImportForAcct(id){state.selectedIds.clear();state.selectedIds.add(id);showImportModal();setTimeout(()=>document.getElementById('importAcctSelect').value=id,50);}
+function openModal(id){document.getElementById(id).classList.add('open');}
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+
+renderColorSwatches();
+loadData();
+</script>
+</body>
+</html>
