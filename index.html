@@ -1311,6 +1311,32 @@ function renderDashboard(trades){
                 ${combinedPct!==null?`<span style="font-size:12px;font-family:'DM Mono',monospace;color:${combinedPct>=0?'#22c55e':'#ef4444'}">${combinedPct>=0?'+':''}${combinedPct.toFixed(2)}%</span>`:''}
               </div>
             </div>`:''}
+            ${(()=>{
+              const today=new Date().toDateString();
+              const todayTrades=getActiveTrades().filter(t=>t.date.toDateString()===today);
+              const todayPnl=todayTrades.reduce((s,t)=>s+t.pnl,0);
+              const todayNet=todayTrades.reduce((s,t)=>s+t.netPnl,0);
+              const todayWins=todayTrades.filter(t=>t.pnl>0).length;
+              const todayLosses=todayTrades.filter(t=>t.pnl<0).length;
+              const todayWR=todayTrades.length?(todayWins/todayTrades.length*100).toFixed(0):0;
+              const isPos=todayPnl>=0;
+              const hasToday=todayTrades.length>0;
+              const pnlColor=isPos?'#22c55e':'#ef4444';
+              const bg=hasToday?(isPos?'rgba(34,197,94,0.06)':'rgba(239,68,68,0.06)'):'transparent';
+              const border=hasToday?(isPos?'#22c55e25':'#ef444425'):'#1a1f2e';
+              return`<div style="background:${bg};border:1px solid ${border};border-radius:8px;padding:12px 14px;margin-bottom:12px;">
+                <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px;">Today's P&amp;L</div>
+                <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">
+                  <div style="font-size:28px;font-weight:700;font-family:'DM Mono',monospace;color:${hasToday?pnlColor:'#374060'};letter-spacing:-.5px;line-height:1;">${hasToday?(isPos?'+':'')+fmtC(todayPnl):'–'}</div>
+                  ${hasToday?`
+                  <div style="display:flex;gap:12px;flex-wrap:wrap;">
+                    <div style="text-align:center;"><div style="font-size:9px;color:#374060;margin-bottom:1px;">Trades</div><div style="font-size:13px;font-weight:600;font-family:'DM Mono',monospace;color:#e2e8f0;">${todayTrades.length}</div></div>
+                    <div style="text-align:center;"><div style="font-size:9px;color:#374060;margin-bottom:1px;">WR</div><div style="font-size:13px;font-weight:600;font-family:'DM Mono',monospace;color:${todayWR>=50?'#22c55e':'#ef4444'}">${todayWR}%</div></div>
+                    <div style="text-align:center;"><div style="font-size:9px;color:#374060;margin-bottom:1px;">W/L</div><div style="font-size:13px;font-weight:600;font-family:'DM Mono',monospace;"><span style="color:#22c55e;">${todayWins}</span><span style="color:#374060;">/</span><span style="color:#ef4444;">${todayLosses}</span></div></div>
+                  </div>`:'<div style="font-size:11px;color:#374060;font-style:italic;">No trades today</div>'}
+                </div>
+              </div>`;
+            })()}
             ${acctBalStats.map(a=>`<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #1a1f2e;">
               <div style="width:8px;height:8px;border-radius:50%;background:${a.color};flex-shrink:0;"></div>
               <div style="flex:1;min-width:0;">
@@ -1385,53 +1411,6 @@ function renderDashboard(trades){
         </div>
 
       </div>
-
-      <!-- TODAY'S P&L BANNER -->
-      ${(()=>{
-        const today=new Date().toDateString();
-        const todayTrades=getActiveTrades().filter(t=>t.date.toDateString()===today);
-        const todayPnl=todayTrades.reduce((s,t)=>s+t.pnl,0);
-        const todayNet=todayTrades.reduce((s,t)=>s+t.netPnl,0);
-        const todayWins=todayTrades.filter(t=>t.pnl>0).length;
-        const todayLosses=todayTrades.filter(t=>t.pnl<0).length;
-        const todayWR=todayTrades.length?(todayWins/todayTrades.length*100).toFixed(0):0;
-        const isPos=todayPnl>=0;
-        const hasToday=todayTrades.length>0;
-        const bgColor=hasToday?(isPos?'linear-gradient(135deg,#091a10,#0a1a0e)':'linear-gradient(135deg,#1a0808,#180a0a)'):'#0a0c11';
-        const borderColor=hasToday?(isPos?'#22c55e30':'#ef444430'):'#1a1f2e';
-        const pnlColor=isPos?'#22c55e':'#ef4444';
-        return`<div style="margin-top:14px;background:${bgColor};border:1px solid ${borderColor};border-radius:10px;padding:14px 20px;display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
-          <div>
-            <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;">Today's P&amp;L</div>
-            <div style="font-size:32px;font-weight:700;font-family:'DM Mono',monospace;color:${hasToday?pnlColor:'#374060'};letter-spacing:-.5px;line-height:1;">${hasToday?(isPos?'+':'')+fmtC(todayPnl):'–'}</div>
-          </div>
-          ${hasToday?`
-          <div style="width:1px;height:48px;background:#1e2535;flex-shrink:0;"></div>
-          <div style="display:flex;gap:20px;flex-wrap:wrap;">
-            <div>
-              <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;">Net P&amp;L</div>
-              <div style="font-size:18px;font-weight:600;font-family:'DM Mono',monospace;color:${todayNet>=0?'#22c55e':'#ef4444'};">${todayNet>=0?'+':''}${fmtC(todayNet)}</div>
-            </div>
-            <div>
-              <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;">Trades</div>
-              <div style="font-size:18px;font-weight:600;font-family:'DM Mono',monospace;color:#e2e8f0;">${todayTrades.length}</div>
-            </div>
-            <div>
-              <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;">Win Rate</div>
-              <div style="font-size:18px;font-weight:600;font-family:'DM Mono',monospace;color:${todayWR>=50?'#22c55e':'#ef4444'}">${todayWR}%</div>
-            </div>
-            <div>
-              <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;">W / L</div>
-              <div style="font-size:18px;font-weight:600;font-family:'DM Mono',monospace;"><span style="color:#22c55e;">${todayWins}W</span> <span style="color:#374060;">/</span> <span style="color:#ef4444;">${todayLosses}L</span></div>
-            </div>
-          </div>
-          <div style="margin-left:auto;">
-            <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;text-align:right;">Date</div>
-            <div style="font-size:13px;color:#6b7898;">${new Date().toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</div>
-          </div>`
-          :`<div style="font-size:12px;color:#374060;font-style:italic;">No trades recorded today</div>`}
-        </div>`;
-      })()}
 
     </div>
     <!-- ── END HEADER ───────────────────────────────────────── -->
