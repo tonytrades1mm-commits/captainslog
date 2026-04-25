@@ -364,7 +364,25 @@ input[type=file]{display:none;}
   </div>
 </div>
 
-<!-- IMPORT MODAL -->
+<!-- WITHDRAWAL MODAL -->
+<div class="modal-bg" id="withdrawalModal">
+  <div class="modal">
+    <div class="modal-title">💸 Record Payout / Withdrawal</div>
+    <input type="hidden" id="withdrawalAcctId"/>
+    <div class="modal-label">Account</div>
+    <div id="withdrawalAcctName" style="font-size:13px;font-weight:500;color:#c8d4e8;margin-bottom:14px;padding:8px 12px;background:#161b28;border-radius:7px;"></div>
+    <div class="modal-label">Withdrawal Amount ($)</div>
+    <input class="modal-input" id="withdrawalAmount" type="number" placeholder="e.g. 1000" min="0"/>
+    <div class="modal-label">Date</div>
+    <input class="modal-input" id="withdrawalDate" type="date"/>
+    <div class="modal-label">Note (optional)</div>
+    <input class="modal-input" id="withdrawalNote" placeholder="e.g. Monthly payout, Reset fee"/>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('withdrawalModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveWithdrawal()">Record Withdrawal</button>
+    </div>
+  </div>
+</div>
 <div class="modal-bg" id="importModal">
   <div class="modal">
     <div class="modal-title">Import Trades</div>
@@ -501,19 +519,23 @@ function calcTrailingDD(acct) {
 async function loadData(){
   setSyncStatus('syncing','Loading...');
   try{
-    const[accounts,trades]=await Promise.all([sb.get('accounts','?order=created_at.asc'),sb.get('trades','?order=date.asc')]);
+    const[accounts,trades,withdrawals]=await Promise.all([
+      sb.get('accounts','?order=created_at.asc'),
+      sb.get('trades','?order=date.asc'),
+      sb.get('withdrawals','?order=date.asc')
+    ]);
     state.accounts=accounts.map(a=>({
       ...a,
       starting_balance: a.starting_balance ? parseFloat(a.starting_balance) : null,
       max_drawdown: a.max_drawdown ? parseFloat(a.max_drawdown) : null,
       profit_goal: a.profit_goal ? parseFloat(a.profit_goal) : null,
-      trades:trades.filter(t=>t.account_id===a.id).map(t=>({date:new Date(t.date),symbol:t.symbol,side:t.side,qty:t.qty,entry:t.entry,exit:t.exit,pnl:t.pnl,fees:t.fees,netPnl:t.net_pnl,dbId:t.id}))
+      trades:trades.filter(t=>t.account_id===a.id).map(t=>({date:new Date(t.date),symbol:t.symbol,side:t.side,qty:t.qty,entry:t.entry,exit:t.exit,pnl:t.pnl,fees:t.fees,netPnl:t.net_pnl,dbId:t.id})),
+      withdrawals:withdrawals.filter(w=>w.account_id===a.id).map(w=>({id:w.id,amount:parseFloat(w.amount),date:new Date(w.date),note:w.note||''}))
     }));
     setSyncStatus('ok','Synced');
     document.getElementById('emptyTitle').textContent=state.accounts.length?'No trades yet':'No accounts yet';
     document.getElementById('emptySub').textContent=state.accounts.length?'Import a Tradovate CSV to get started.':'Create your first account to get started.';
     renderAll();
-    // Check for newly achieved goals after load
     setTimeout(()=>checkGoalAchievements(false),800);
   }catch(e){setSyncStatus('err','Connection error');document.getElementById('emptyTitle').textContent='Could not connect';document.getElementById('emptySub').textContent='Check your internet connection.';toast('Failed to connect','error');}
 }
@@ -562,6 +584,70 @@ async function clearGoalSettings(){
     acct.profit_goal=null;
     setSyncStatus('ok','Synced');toast('Goal removed','success');closeModal('editGoalModal');renderAll();
   }catch(e){setSyncStatus('err','Save failed');toast('Failed: '+e.message,'error');}
+}
+
+// ── WITHDRAWAL CRUD ───────────────────────────────────────────────────────────
+function showWithdrawalModal(acctId){
+  const acct=state.accounts.find(a=>a.id===acctId);if(!acct)return;
+  document.getElementById('withdrawalAcctId').value=acctId;
+  document.getElementById('withdrawalAcctName').textContent=acct.name;
+  document.getElementById('withdrawalAmount').value='';
+  document.getElementById('withdrawalNote').value='';
+  document.getElementById('withdrawalDate').value=new Date().toISOString().slice(0,10);
+  openModal('withdrawalModal');
+}
+
+async function saveWithdrawal(){
+  const acctId=document.getElementById('withdrawalAcctId').value;
+  const amount=parseFloat(document.getElementById('withdrawalAmount').value);
+  const date=document.getElementById('withdrawalDate').value;
+  const note=document.getElementById('withdrawalNote').value.trim();
+  if(!amount||amount<=0){toast('Please enter a valid amount','error');return;}
+  if(!date){toast('Please enter a date','error');return;}
+  const row={
+    id:'wd_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
+    account_id:acctId,
+    amount,
+    date:new Date(date).toISOString(),
+    note:note||null
+  };
+  setSyncStatus('syncing','Saving...');
+  try{
+    await sb.post('withdrawals',row);
+    const acct=state.accounts.find(a=>a.id===acctId);
+    if(!acct.withdrawals) acct.withdrawals=[];
+    acct.withdrawals.push({id:row.id,amount,date:new Date(date),note:note||''});
+    setSyncStatus('ok','Synced');
+    toast(`$${amount.toLocaleString()} withdrawal recorded`,'success');
+    closeModal('withdrawalModal');
+    renderAll();
+  }catch(e){setSyncStatus('err','Save failed');toast('Failed: '+e.message,'error');}
+}
+
+async function deleteWithdrawal(wdId, acctId){
+  if(!confirm('Delete this withdrawal record?'))return;
+  setSyncStatus('syncing','Deleting...');
+  try{
+    await sb.del('withdrawals',`?id=eq.${wdId}`);
+    const acct=state.accounts.find(a=>a.id===acctId);
+    acct.withdrawals=acct.withdrawals.filter(w=>w.id!==wdId);
+    setSyncStatus('ok','Synced');
+    toast('Withdrawal deleted','success');
+    renderAll();
+  }catch(e){setSyncStatus('err','Delete failed');toast('Failed: '+e.message,'error');}
+}
+
+// Helper: get total withdrawals for an account
+function totalWithdrawals(acct){
+  return (acct.withdrawals||[]).reduce((s,w)=>s+w.amount,0);
+}
+
+// Helper: get true current balance (starting + pnl - withdrawals)
+function currentBalance(acct){
+  if(!acct.starting_balance) return null;
+  const pnl=acct.trades.reduce((s,t)=>s+t.netPnl,0);
+  const wd=totalWithdrawals(acct);
+  return acct.starting_balance+pnl-wd;
 }
 
 function showEditDD(id){
@@ -783,8 +869,9 @@ function renderSidebar(){
     const isBlown=dd&&dd.blown;
     const goalAchieved=a.profit_goal&&grossPnl>=a.profit_goal;
     const hasBal=!!a.starting_balance;
-    const currentBal=hasBal?a.starting_balance+netPnl:null;
-    const pctChange=hasBal&&a.starting_balance?((netPnl/a.starting_balance)*100):null;
+    const currentBal=currentBalance(a);
+    const netPnl2=a.trades.reduce((s,t)=>s+t.netPnl,0);
+    const pctChange=hasBal&&a.starting_balance?((netPnl2-totalWithdrawals(a))/a.starting_balance)*100:null;
     return`<div class="acct-row${soloOnly?' solo-active':''}" onclick="soloAccount('${a.id}')">
       <div class="acct-checkbox${checked?' checked':''}" onclick="toggleAccount('${a.id}',event)"></div>
       <div class="acct-avatar" style="background:${a.color}20;color:${a.color}">${a.name[0].toUpperCase()}</div>
@@ -988,7 +1075,9 @@ function renderDashboard(trades){
   // Compute balance stats for selected accounts
   const acctBalStats = activeAccts.filter(a=>a.starting_balance).map(a=>{
     const aPnl=a.trades.reduce((s,t)=>s+t.netPnl,0);
-    return{name:a.name,color:a.color,startBal:a.starting_balance,currentBal:a.starting_balance+aPnl,pnl:aPnl,pct:(aPnl/a.starting_balance)*100};
+    const wd=totalWithdrawals(a);
+    const bal=currentBalance(a);
+    return{name:a.name,color:a.color,id:a.id,startBal:a.starting_balance,currentBal:bal,pnl:aPnl,wd,pct:((aPnl-wd)/a.starting_balance)*100};
   });
   const combinedStartBal=acctBalStats.reduce((s,a)=>s+a.startBal,0);
   const combinedCurrentBal=acctBalStats.reduce((s,a)=>s+a.currentBal,0);
@@ -1045,16 +1134,18 @@ function renderDashboard(trades){
                 ${combinedPct!==null?`<span style="font-size:12px;font-family:'DM Mono',monospace;color:${combinedPct>=0?'#22c55e':'#ef4444'}">${combinedPct>=0?'+':''}${combinedPct.toFixed(2)}%</span>`:''}
               </div>
             </div>`:''}
-            ${acctBalStats.map(a=>`<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+            ${acctBalStats.map(a=>`<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #1a1f2e;">
               <div style="width:8px;height:8px;border-radius:50%;background:${a.color};flex-shrink:0;"></div>
               <div style="flex:1;min-width:0;">
                 <div style="font-size:10px;color:#6b7898;margin-bottom:2px;">${a.name}</div>
-                <div style="font-size:18px;font-weight:700;font-family:'DM Mono',monospace;color:#fff;">${fmtC(a.currentBal)}</div>
-                <div style="display:flex;gap:8px;margin-top:2px;">
-                  <span style="font-size:11px;font-family:'DM Mono',monospace;color:${a.pnl>=0?'#22c55e':'#ef4444'}">${a.pnl>=0?'+':''}${fmtM(a.pnl)}</span>
+                <div style="font-size:22px;font-weight:700;font-family:'DM Mono',monospace;color:#fff;">${fmtC(a.currentBal)}</div>
+                <div style="display:flex;gap:8px;margin-top:3px;flex-wrap:wrap;">
+                  <span style="font-size:11px;font-family:'DM Mono',monospace;color:${a.pnl>=0?'#22c55e':'#ef4444'}">${a.pnl>=0?'+':''}${fmtM(a.pnl)} P&amp;L</span>
                   <span style="font-size:11px;font-family:'DM Mono',monospace;color:${a.pct>=0?'#22c55e':'#ef4444'}">${a.pct>=0?'+':''}${a.pct.toFixed(2)}%</span>
+                  ${a.wd>0?`<span style="font-size:11px;font-family:'DM Mono',monospace;color:#f59e0b;">−${fmtC(a.wd)} withdrawn</span>`:''}
                 </div>
               </div>
+              <button onclick="showWithdrawalModal('${a.id}')" style="flex-shrink:0;padding:5px 10px;border-radius:6px;border:1px solid #1e2540;background:transparent;color:#6b7898;font-size:10px;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;" onmouseover="this.style.color='#c8d4e8';this.style.background='#161b28'" onmouseout="this.style.color='#6b7898';this.style.background='transparent'">💸 Payout</button>
             </div>`).join('')}
           `:`<div style="color:#4b5a7a;font-size:12px;">Set a starting balance in <span style="color:#3b82f6;cursor:pointer;" onclick="setTab('accounts',document.querySelectorAll('.nav-tab')[5])">Account Settings</span> to track balance.</div>`}
         </div>
@@ -1069,21 +1160,27 @@ function renderDashboard(trades){
             const achieved=aPnl>=goal;
             const remaining=goal-aPnl;
             const fillColor=achieved?'#f59e0b':pct>75?'#22c55e':pct>40?'#3b82f6':'#6b7898';
-            return`<div style="margin-bottom:14px;">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-                <div style="display:flex;align-items:center;gap:6px;">
-                  <div style="width:7px;height:7px;border-radius:50%;background:${a.color};"></div>
-                  <span style="font-size:11px;color:#c8d4e8;">${a.name}</span>
-                  ${achieved?'<span style="font-size:10px;background:#1a1200;color:#f59e0b;padding:1px 6px;border-radius:4px;border:1px solid #f59e0b40;">🏆 Done</span>':''}
-                </div>
-                <span style="font-size:11px;font-family:'DM Mono',monospace;color:${achieved?'#f59e0b':'#c8d4e8'}">${fmtM(aPnl)} / ${fmtM(goal)}</span>
+            const pnlColor=achieved?'#f59e0b':aPnl>=0?'#22c55e':'#ef4444';
+            return`<div style="margin-bottom:16px;">
+              <!-- Account name + badge -->
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+                <div style="width:7px;height:7px;border-radius:50%;background:${a.color};flex-shrink:0;"></div>
+                <span style="font-size:11px;color:#c8d4e8;">${a.name}</span>
+                ${achieved?'<span style="font-size:10px;background:#1a1200;color:#f59e0b;padding:1px 6px;border-radius:4px;border:1px solid #f59e0b40;margin-left:4px;">🏆 Done</span>':''}
               </div>
-              <div style="height:8px;background:#161b28;border-radius:4px;overflow:hidden;margin-bottom:4px;">
-                <div style="height:100%;width:${pct.toFixed(1)}%;background:${fillColor};border-radius:4px;transition:width .5s;${achieved?'box-shadow:0 0 6px #f59e0b50':''}"></div>
+              <!-- BIG P&L AMOUNT -->
+              <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px;">
+                <div style="font-size:32px;font-weight:700;font-family:'DM Mono',monospace;color:${pnlColor};letter-spacing:-.5px;line-height:1;">${aPnl>=0?'+':''}${fmtC(aPnl)}</div>
+                <div style="font-size:13px;color:#374060;">/ ${fmtC(goal)}</div>
               </div>
+              <!-- Progress bar -->
+              <div style="height:10px;background:#161b28;border-radius:5px;overflow:hidden;margin-bottom:6px;">
+                <div style="height:100%;width:${pct.toFixed(1)}%;background:${fillColor};border-radius:5px;transition:width .5s;${achieved?'box-shadow:0 0 8px #f59e0b60':''}"></div>
+              </div>
+              <!-- Meta row -->
               <div style="display:flex;justify-content:space-between;font-size:10px;">
-                <span style="color:#4b5a7a;">${pct.toFixed(0)}% complete</span>
-                <span style="color:${achieved?'#f59e0b':'#4b5a7a'}">${achieved?'Goal reached! 🎉':'$'+Math.abs(remaining).toLocaleString()+' to go'}</span>
+                <span style="color:#4b5a7a;">${pct.toFixed(1)}% complete</span>
+                <span style="color:${achieved?'#f59e0b':remaining>0?'#ef4444':'#22c55e'};font-weight:500;">${achieved?'Goal reached! 🎉':fmtC(remaining)+' to go'}</span>
               </div>
             </div>`;
           }).join('')
@@ -1095,6 +1192,21 @@ function renderDashboard(trades){
     <!-- ── END HEADER ───────────────────────────────────────── -->
 
     ${blownAccts.length?blownAccts.map(a=>`<div class="blown-banner" style="margin-bottom:12px;"><div class="blown-icon">🚨</div><div class="blown-text"><div class="blown-title">${a.name} — Account Blown</div><div class="blown-sub">Balance hit the trailing drawdown floor. <span style="color:#3b82f6;cursor:pointer;" onclick="setTab('drawdown',document.querySelectorAll('.nav-tab')[3])">View details →</span></div></div></div>`).join(''):''}
+
+    <!-- CALENDAR RIGHT UNDER HEADER -->
+    <div class="chart-card" style="margin-bottom:16px;">
+      <div class="chart-head">
+        <span class="chart-title">Monthly Calendar</span>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <button class="cal-nav-btn" onclick="dashCalNav(-1)">‹</button>
+          <span style="font-size:11px;color:#6b7898;min-width:100px;text-align:center;" id="dashCalMonthLabel"></span>
+          <button class="cal-nav-btn" onclick="dashCalNav(1)">›</button>
+          <button class="btn btn-ghost" style="font-size:10px;padding:3px 8px;" onclick="dashCalYear=new Date().getFullYear();dashCalMonth=new Date().getMonth();renderDashCal(dashCalTrades)">Today</button>
+          <span style="cursor:pointer;font-size:11px;color:#3b82f6;padding:3px 8px;" onclick="setTab('calendar',document.querySelectorAll('.nav-tab')[4])">Full Calendar →</span>
+        </div>
+      </div>
+      <div id="dashCalGrid"></div>
+    </div>
 
     <div class="stat-grid">
       <div class="stat-card"><div class="stat-label">Net P&amp;L</div><div class="stat-val ${netPnl>=0?'g':'r'}">${fmtM(netPnl)}</div><div class="stat-sub">Gross: ${fmtM(totalPnl)}</div></div>
@@ -1133,19 +1245,6 @@ function renderDashboard(trades){
         <div style="display:flex;align-items:center;gap:8px;" id="todayChartMeta"></div>
       </div>
       <div style="position:relative;height:180px;"><canvas id="todayChart" role="img" aria-label="Today intraday PnL">Today's trades</canvas></div>
-    </div>
-    <div class="chart-card" style="margin-bottom:14px;">
-      <div class="chart-head">
-        <span class="chart-title">Monthly Calendar</span>
-        <div style="display:flex;align-items:center;gap:6px;">
-          <button class="cal-nav-btn" onclick="dashCalNav(-1)">‹</button>
-          <span style="font-size:11px;color:#6b7898;min-width:100px;text-align:center;" id="dashCalMonthLabel"></span>
-          <button class="cal-nav-btn" onclick="dashCalNav(1)">›</button>
-          <button class="btn btn-ghost" style="font-size:10px;padding:3px 8px;" onclick="dashCalYear=new Date().getFullYear();dashCalMonth=new Date().getMonth();renderDashCal(dashCalTrades)">Today</button>
-          <span style="cursor:pointer;font-size:11px;color:#3b82f6;padding:3px 8px;" onclick="setTab('calendar',document.querySelectorAll('.nav-tab')[4])">Full Calendar →</span>
-        </div>
-      </div>
-      <div id="dashCalGrid"></div>
     </div>
     ${renderGoalCards(activeAccts)}`;
   setTimeout(()=>{drawEquity(trades);drawDaily(trades);drawWL(wins.length,losses.length);drawSymbols(trades);drawHourly(trades);drawTodayIntraday(trades);renderDashCal(trades);checkGoalAchievements(true);},50);
@@ -1730,25 +1829,48 @@ function renderCalendar(preserveScroll=false){
 function renderAccountsView(){
   document.getElementById('emptyState').style.display='none';
   document.getElementById('accountsView').style.display='block';
-  document.getElementById('accountsView').innerHTML=`<div class="filter-bar"><div class="page-title">Manage Accounts</div><div class="spacer"></div><button class="btn btn-primary" onclick="showAddAccount()">+ Add Account</button></div>${!state.accounts.length?'<div class="empty-state"><div class="empty-icon">🗂</div><div class="empty-title">No accounts yet</div></div>':state.accounts.map(a=>{
-    const t=a.trades,pnl=t.reduce((s,x)=>s+x.netPnl,0),wins=t.filter(x=>x.pnl>0).length;
-    const wr=t.length?(wins/t.length*100).toFixed(1):'–';
-    const dd=calcTrailingDD(a);
-    const isBlown=dd&&dd.blown;
-    return`<div class="acct-mgr-row${isBlown?' blown':''}">
-      <div style="width:38px;height:38px;border-radius:9px;background:${a.color}20;color:${a.color};font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${a.name[0].toUpperCase()}</div>
-      <div class="acct-mgr-info">
-        <div class="acct-mgr-name">${a.name}${isBlown?'<span style="font-size:10px;background:#2b0808;color:#ef4444;padding:2px 6px;border-radius:4px;font-weight:500;">BLOWN</span>':''}</div>
-        <div class="acct-mgr-meta">${a.type} · ${t.length} trades · WR: ${wr}${wr!=='–'?'%':''}${dd?` · Floor: ${fmtC(dd.currentFloor)} · Buffer: ${fmtC(dd.distanceToFloor)}`:''}</div>
-      </div>
-      <div style="font-family:'DM Mono',monospace;font-size:13px;font-weight:500;color:${pnl>=0?'#22c55e':'#ef4444'};margin-right:8px;">${fmtM(pnl)}</div>
-      <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;" onclick="soloAccount('${a.id}');setTab('dashboard',document.querySelectorAll('.nav-tab')[0])">View</button>
-      <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="showEditDD('${a.id}')">DD Settings</button>
-      <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="showEditGoal('${a.id}')">🎯 Goal</button>
-      <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="showImportForAcct('${a.id}')">↑ Import</button>
-      <button class="btn btn-danger" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="deleteAccount('${a.id}')">Delete</button>
-    </div>`;
-  }).join('')}`;
+  document.getElementById('accountsView').innerHTML=`
+    <div class="filter-bar"><div class="page-title">Manage Accounts</div><div class="spacer"></div><button class="btn btn-primary" onclick="showAddAccount()">+ Add Account</button></div>
+    ${!state.accounts.length?'<div class="empty-state"><div class="empty-icon">🗂</div><div class="empty-title">No accounts yet</div></div>':
+    state.accounts.map(a=>{
+      const t=a.trades,netPnl=t.reduce((s,x)=>s+x.netPnl,0),wins=t.filter(x=>x.pnl>0).length;
+      const wr=t.length?(wins/t.length*100).toFixed(1):'–';
+      const dd=calcTrailingDD(a);
+      const isBlown=dd&&dd.blown;
+      const bal=currentBalance(a);
+      const wd=totalWithdrawals(a);
+      const wdList=(a.withdrawals||[]).sort((x,y)=>y.date-x.date);
+      return`<div class="acct-mgr-row${isBlown?' blown':''}" style="flex-direction:column;align-items:stretch;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="width:38px;height:38px;border-radius:9px;background:${a.color}20;color:${a.color};font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${a.name[0].toUpperCase()}</div>
+          <div class="acct-mgr-info">
+            <div class="acct-mgr-name">${a.name}${isBlown?'<span style="font-size:10px;background:#2b0808;color:#ef4444;padding:2px 6px;border-radius:4px;font-weight:500;margin-left:6px;">BLOWN</span>':''}</div>
+            <div class="acct-mgr-meta">
+              ${a.type} · ${t.length} trades · WR: ${wr}${wr!=='–'?'%':''}
+              ${bal!==null?` · Balance: <span style="color:#fff;font-family:'DM Mono',monospace;">${fmtC(bal)}</span>`:''}
+              ${wd>0?` · Withdrawn: <span style="color:#f59e0b;font-family:'DM Mono',monospace;">${fmtC(wd)}</span>`:''}
+              ${dd?` · Floor: ${fmtC(dd.currentFloor)}`:''}
+            </div>
+          </div>
+          <div style="font-family:'DM Mono',monospace;font-size:13px;font-weight:500;color:${netPnl>=0?'#22c55e':'#ef4444'};margin-right:8px;">${fmtM(netPnl)}</div>
+          <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;" onclick="soloAccount('${a.id}');setTab('dashboard',document.querySelectorAll('.nav-tab')[0])">View</button>
+          <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="showEditDD('${a.id}')">DD Settings</button>
+          <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="showEditGoal('${a.id}')">🎯 Goal</button>
+          <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;color:#f59e0b;border-color:#f59e0b40;" onclick="showWithdrawalModal('${a.id}')">💸 Payout</button>
+          <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="showImportForAcct('${a.id}')">↑ Import</button>
+          <button class="btn btn-danger" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="deleteAccount('${a.id}')">Delete</button>
+        </div>
+        ${wdList.length?`<div style="margin-top:10px;padding-top:10px;border-top:1px solid #1a1f2e;">
+          <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px;">Payout History</div>
+          ${wdList.map(w=>`<div style="display:flex;align-items:center;gap:10px;padding:5px 0;font-size:11px;">
+            <div style="color:#f59e0b;font-family:'DM Mono',monospace;font-weight:600;">−${fmtC(w.amount)}</div>
+            <div style="color:#4b5a7a;">${w.date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</div>
+            <div style="color:#6b7898;flex:1;">${w.note||'Withdrawal'}</div>
+            <button onclick="deleteWithdrawal('${w.id}','${a.id}')" style="background:transparent;border:none;color:#4b5a7a;cursor:pointer;font-size:10px;padding:2px 6px;border-radius:4px;" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='#4b5a7a'">✕</button>
+          </div>`).join('')}
+        </div>`:''}
+      </div>`;
+    }).join('')}`;
 }
 
 function showImportForAcct(id){state.selectedIds.clear();state.selectedIds.add(id);showImportModal();setTimeout(()=>document.getElementById('importAcctSelect').value=id,50);}
