@@ -1339,11 +1339,12 @@ function renderDashboard(trades){
             const fillColor=achieved?'#f59e0b':pct>75?'#22c55e':pct>40?'#3b82f6':'#6b7898';
             const pnlColor=achieved?'#f59e0b':aPnl>=0?'#22c55e':'#ef4444';
             return`<div style="margin-bottom:16px;">
-              <!-- Account name + badge -->
+              <!-- Account name + badge + edit -->
               <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
                 <div style="width:7px;height:7px;border-radius:50%;background:${a.color};flex-shrink:0;"></div>
                 <span style="font-size:11px;color:#c8d4e8;">${a.name}</span>
                 ${achieved?'<span style="font-size:10px;background:#1a1200;color:#f59e0b;padding:1px 6px;border-radius:4px;border:1px solid #f59e0b40;margin-left:4px;">🏆 Done</span>':''}
+                <span onclick="showEditGoal('${a.id}')" style="margin-left:auto;font-size:10px;color:#374060;cursor:pointer;padding:2px 7px;border-radius:4px;border:1px solid #1e2540;background:#161b28;white-space:nowrap;" onmouseover="this.style.color='#c8d4e8';this.style.borderColor='#2a3558'" onmouseout="this.style.color='#374060';this.style.borderColor='#1e2540'">✎ Edit Goal</span>
               </div>
               <!-- Current P&L + Target (smaller) -->
               <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px;">
