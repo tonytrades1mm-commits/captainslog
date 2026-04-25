@@ -2073,24 +2073,24 @@ function launchConfetti(){
   confettiActive=true;
   confettiPieces=[];
 
-  // Money symbols and bills
   const moneySymbols=['💵','💴','💶','💷','💰','💸','🤑','💵','💵','💵'];
   const startTime=Date.now();
-  const duration=3200; // 3.2 seconds total
+  const duration=8000; // 8 seconds
 
-  // Spawn 80 money pieces staggered across 3 seconds
-  for(let i=0;i<80;i++){
+  // Spawn 120 pieces staggered across the full 8 seconds
+  for(let i=0;i<120;i++){
     confettiPieces.push({
       x: Math.random()*canvas.width,
-      y: -40 - Math.random()*canvas.height, // start above screen, staggered
-      vy: 1.2 + Math.random()*1.8,           // slow fall
-      vx: (Math.random()-0.5)*1.2,           // slight drift
-      rot: (Math.random()-0.5)*20,            // tilt
-      rotV: (Math.random()-0.5)*0.8,          // gentle spin
-      size: 22 + Math.random()*18,            // 22–40px
+      y: -40 - Math.random()*80,
+      vy: 2.8 + Math.random()*2.4,   // slightly faster fall
+      vx: (Math.random()-0.5)*1.4,   // gentle side drift
+      rot: (Math.random()-0.5)*25,
+      rotV: (Math.random()-0.5)*1.0,
+      size: 24 + Math.random()*20,   // 24–44px
       symbol: moneySymbols[Math.floor(Math.random()*moneySymbols.length)],
       opacity: 1,
-      delay: Math.random()*2000              // stagger spawn over 2 seconds
+      delay: Math.random()*6000,     // stagger spawns over 6 seconds
+      done: false
     });
   }
 
@@ -2100,21 +2100,30 @@ function launchConfetti(){
     ctx.clearRect(0,0,canvas.width,canvas.height);
 
     confettiPieces.forEach(p=>{
-      // Respect spawn delay
+      if(p.done) return;
       if(elapsed<p.delay) return;
 
       p.x+=p.vx;
       p.y+=p.vy;
       p.rot+=p.rotV;
 
-      // Fade out in last 800ms of duration
+      // Fade out only in the final 1 second of the total duration
       const remaining=duration-elapsed;
-      if(remaining<800) p.opacity=Math.max(0,remaining/800);
+      if(remaining<1000){
+        p.opacity=Math.max(0,remaining/1000);
+      }
 
-      // Also fade if fallen past screen
-      if(p.y>canvas.height+40) p.opacity=0;
+      // Recycle piece back to top when it falls off bottom
+      // so money keeps falling for the full 8 seconds
+      if(p.y>canvas.height+50 && remaining>1000){
+        p.y=-40-Math.random()*60;
+        p.x=Math.random()*canvas.width;
+        p.vy=2.8+Math.random()*2.4;
+        p.vx=(Math.random()-0.5)*1.4;
+        p.symbol=moneySymbols[Math.floor(Math.random()*moneySymbols.length)];
+      }
 
-      if(p.opacity<=0) return;
+      if(p.opacity<=0){p.done=true;return;}
 
       ctx.save();
       ctx.globalAlpha=p.opacity;
