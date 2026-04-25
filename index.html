@@ -253,10 +253,110 @@ input[type=file]{display:none;}
 .group-acct-check{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:6px;cursor:pointer;font-size:12px;color:#8090b0;margin-bottom:2px;}
 .group-acct-check:hover{background:#161b28;color:#c8d4e8;}
 .group-acct-check input{width:14px;height:14px;accent-color:#2563eb;cursor:pointer;}
+
+/* ── MOBILE RESPONSIVE ──────────────────────────────────────────────────────── */
+/* Hamburger button — hidden on desktop */
+.hamburger{display:none;flex-direction:column;gap:4px;cursor:pointer;padding:6px;border:none;background:transparent;border-radius:6px;}
+.hamburger span{display:block;width:20px;height:2px;background:#c8d4e8;border-radius:2px;transition:all .25s;}
+.hamburger.open span:nth-child(1){transform:rotate(45deg) translate(4px,4px);}
+.hamburger.open span:nth-child(2){opacity:0;}
+.hamburger.open span:nth-child(3){transform:rotate(-45deg) translate(4px,-4px);}
+
+/* Sidebar overlay for mobile */
+.sidebar-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);z-index:149;}
+.sidebar-overlay.open{display:block;}
+
+/* Bottom nav bar for mobile — hidden on desktop */
+.mobile-bottom-nav{display:none;}
+
+@media (max-width:768px){
+  /* NAV */
+  nav{padding:0 12px;gap:8px;height:48px;}
+  .logo{font-size:13px;}
+  .logo-mark{width:24px;height:24px;font-size:11px;}
+  .nav-tab{display:none;} /* Hide desktop tabs — replaced by bottom nav */
+  .nav-right .btn-ghost{display:none;} /* Hide import button in nav */
+  .nav-right .btn-primary{display:none;} /* Hide + Account in nav */
+  .sync-bar span{display:none;} /* Show only dot on mobile */
+  .hamburger{display:flex;}
+
+  /* SIDEBAR — slide in from left */
+  .sidebar{
+    position:fixed;top:0;left:0;bottom:0;
+    width:260px;z-index:150;
+    transform:translateX(-100%);
+    transition:transform .25s ease;
+    overflow-y:auto;
+  }
+  .sidebar.open{transform:translateX(0);}
+
+  /* BODY layout */
+  .body{flex-direction:column;}
+  .content{padding:12px;padding-bottom:70px;} /* bottom padding for nav bar */
+
+  /* MOBILE BOTTOM NAV */
+  .mobile-bottom-nav{
+    display:flex;position:fixed;bottom:0;left:0;right:0;
+    background:#0c0e14;border-top:1px solid #1a1f2e;
+    height:56px;z-index:100;
+  }
+  .mob-nav-btn{
+    flex:1;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:2px;cursor:pointer;
+    border:none;background:transparent;color:#4b5a7a;
+    font-family:'DM Sans',sans-serif;font-size:9px;
+    transition:all .15s;padding:4px 2px;
+  }
+  .mob-nav-btn.active{color:#fff;}
+  .mob-nav-btn .mob-icon{font-size:18px;line-height:1;}
+  .mob-nav-btn span{font-size:9px;}
+
+  /* HEADER — stack balance + goal vertically */
+  .body > .content > div[style*="background:#0c0e14"] > div[style*="grid-template-columns:1fr 1fr"]{
+    grid-template-columns:1fr !important;
+  }
+
+  /* STAT GRID — 2 columns on mobile */
+  .stat-grid{grid-template-columns:repeat(2,1fr) !important;}
+  .stat-val{font-size:16px !important;}
+
+  /* CHARTS — full width */
+  .g2,.g3{grid-template-columns:1fr !important;}
+
+  /* CALENDAR — hide week column on mobile, smaller cells */
+  .cal-pnl{font-size:10px !important;}
+  .cal-trades{display:none;}
+
+  /* TABLE — hide less important columns */
+  .trade-hide-mobile{display:none;}
+
+  /* MODAL — full screen on mobile */
+  .modal{width:95vw;max-height:85vh;overflow-y:auto;}
+
+  /* GOAL POPUP */
+  .goal-popup{width:90vw;padding:28px 20px;}
+  .goal-popup-amount{font-size:24px;}
+
+  /* FILTERS */
+  .filter-bar{gap:6px;}
+  .page-title{font-size:14px;}
+
+  /* ACCT DROPDOWN — full width on mobile */
+  #acctDropdown{min-width:80vw !important;max-height:60vh;overflow-y:auto;}
+}
+
+@media (max-width:480px){
+  .stat-grid{grid-template-columns:repeat(2,1fr) !important;}
+  .content{padding:10px;padding-bottom:70px;}
+  nav{padding:0 10px;}
+}
 </style>
 <body>
 <div class="app">
 <nav>
+  <button class="hamburger" id="hamburger" onclick="toggleSidebar()">
+    <span></span><span></span><span></span>
+  </button>
   <div class="logo"><div class="logo-mark">📈</div>TradeLog Pro</div>
   <button class="nav-tab active" onclick="setTab('dashboard',this)">Dashboard</button>
   <button class="nav-tab" onclick="setTab('trades',this)">Trades</button>
@@ -270,6 +370,7 @@ input[type=file]{display:none;}
     <button class="btn btn-primary" onclick="showAddAccount()">+ Account</button>
   </div>
 </nav>
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
 <div class="body">
   <aside class="sidebar">
     <div class="sidebar-top">
@@ -446,6 +547,25 @@ input[type=file]{display:none;}
   <div class="goal-popup-amount" id="goalPopupAmount"></div>
   <button class="goal-popup-close" onclick="closeGoalPopup()">Keep Trading! 🚀</button>
 </div>
+
+<!-- MOBILE BOTTOM NAV -->
+<nav class="mobile-bottom-nav" id="mobileBottomNav">
+  <button class="mob-nav-btn active" id="mob-dashboard" onclick="mobNav('dashboard',this)">
+    <div class="mob-icon">📊</div><span>Dashboard</span>
+  </button>
+  <button class="mob-nav-btn" id="mob-trades" onclick="mobNav('trades',this)">
+    <div class="mob-icon">📋</div><span>Trades</span>
+  </button>
+  <button class="mob-nav-btn" id="mob-calendar" onclick="mobNav('calendar',this)">
+    <div class="mob-icon">📅</div><span>Calendar</span>
+  </button>
+  <button class="mob-nav-btn" id="mob-drawdown" onclick="mobNav('drawdown',this)">
+    <div class="mob-icon">📉</div><span>Drawdown</span>
+  </button>
+  <button class="mob-nav-btn" id="mob-accounts" onclick="mobNav('accounts',this)">
+    <div class="mob-icon">👤</div><span>Accounts</span>
+  </button>
+</nav>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
 const SUPABASE_URL='https://syjwahkwsvkohleknmna.supabase.co';
@@ -981,7 +1101,17 @@ function getSelectionLabel(){if(isAllSelected())return`All Accounts <span style=
 function renderSelPills(){const active=getActiveAccounts();if(active.length===state.accounts.length||active.length===0)return'';return`<div class="acct-pills">${active.map(a=>`<span class="acct-pill" style="background:${a.color}20;color:${a.color};">${a.name}</span>`).join('')}</div>`;}
 
 // ── NAVIGATION ────────────────────────────────────────────────────────────────
-function setTab(tab,el){state.activeTab=tab;document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));el.classList.add('active');renderContent();}
+function setTab(tab,el){
+  state.activeTab=tab;
+  document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  // Sync mobile bottom nav
+  document.querySelectorAll('.mob-nav-btn').forEach(b=>b.classList.remove('active'));
+  const mobId=document.getElementById(`mob-${tab}`);
+  if(mobId) mobId.classList.add('active');
+  renderContent();
+  closeSidebar();
+}
 function renderAll(){renderSidebar();renderContent();}
 
 function renderSidebar(){
@@ -1311,32 +1441,6 @@ function renderDashboard(trades){
                 ${combinedPct!==null?`<span style="font-size:12px;font-family:'DM Mono',monospace;color:${combinedPct>=0?'#22c55e':'#ef4444'}">${combinedPct>=0?'+':''}${combinedPct.toFixed(2)}%</span>`:''}
               </div>
             </div>`:''}
-            ${(()=>{
-              const today=new Date().toDateString();
-              const todayTrades=getActiveTrades().filter(t=>t.date.toDateString()===today);
-              const todayPnl=todayTrades.reduce((s,t)=>s+t.pnl,0);
-              const todayNet=todayTrades.reduce((s,t)=>s+t.netPnl,0);
-              const todayWins=todayTrades.filter(t=>t.pnl>0).length;
-              const todayLosses=todayTrades.filter(t=>t.pnl<0).length;
-              const todayWR=todayTrades.length?(todayWins/todayTrades.length*100).toFixed(0):0;
-              const isPos=todayPnl>=0;
-              const hasToday=todayTrades.length>0;
-              const pnlColor=isPos?'#22c55e':'#ef4444';
-              const bg=hasToday?(isPos?'rgba(34,197,94,0.06)':'rgba(239,68,68,0.06)'):'transparent';
-              const border=hasToday?(isPos?'#22c55e25':'#ef444425'):'#1a1f2e';
-              return`<div style="background:${bg};border:1px solid ${border};border-radius:8px;padding:12px 14px;margin-bottom:12px;">
-                <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px;">Today's P&amp;L</div>
-                <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">
-                  <div style="font-size:28px;font-weight:700;font-family:'DM Mono',monospace;color:${hasToday?pnlColor:'#374060'};letter-spacing:-.5px;line-height:1;">${hasToday?(isPos?'+':'')+fmtC(todayPnl):'–'}</div>
-                  ${hasToday?`
-                  <div style="display:flex;gap:12px;flex-wrap:wrap;">
-                    <div style="text-align:center;"><div style="font-size:9px;color:#374060;margin-bottom:1px;">Trades</div><div style="font-size:13px;font-weight:600;font-family:'DM Mono',monospace;color:#e2e8f0;">${todayTrades.length}</div></div>
-                    <div style="text-align:center;"><div style="font-size:9px;color:#374060;margin-bottom:1px;">WR</div><div style="font-size:13px;font-weight:600;font-family:'DM Mono',monospace;color:${todayWR>=50?'#22c55e':'#ef4444'}">${todayWR}%</div></div>
-                    <div style="text-align:center;"><div style="font-size:9px;color:#374060;margin-bottom:1px;">W/L</div><div style="font-size:13px;font-weight:600;font-family:'DM Mono',monospace;"><span style="color:#22c55e;">${todayWins}</span><span style="color:#374060;">/</span><span style="color:#ef4444;">${todayLosses}</span></div></div>
-                  </div>`:'<div style="font-size:11px;color:#374060;font-style:italic;">No trades today</div>'}
-                </div>
-              </div>`;
-            })()}
             ${acctBalStats.map(a=>`<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #1a1f2e;">
               <div style="width:8px;height:8px;border-radius:50%;background:${a.color};flex-shrink:0;"></div>
               <div style="flex:1;min-width:0;">
@@ -1350,6 +1454,32 @@ function renderDashboard(trades){
               </div>
               <button onclick="showWithdrawalModal('${a.id}')" style="flex-shrink:0;padding:5px 10px;border-radius:6px;border:1px solid #1e2540;background:transparent;color:#6b7898;font-size:10px;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;" onmouseover="this.style.color='#c8d4e8';this.style.background='#161b28'" onmouseout="this.style.color='#6b7898';this.style.background='transparent'">💸 Payout</button>
             </div>`).join('')}
+            ${(()=>{
+              const today=new Date().toDateString();
+              const todayTrades=getActiveTrades().filter(t=>t.date.toDateString()===today);
+              const todayPnl=todayTrades.reduce((s,t)=>s+t.pnl,0);
+              const todayNet=todayTrades.reduce((s,t)=>s+t.netPnl,0);
+              const todayWins=todayTrades.filter(t=>t.pnl>0).length;
+              const todayLosses=todayTrades.filter(t=>t.pnl<0).length;
+              const todayWR=todayTrades.length?(todayWins/todayTrades.length*100).toFixed(0):0;
+              const isPos=todayPnl>=0;
+              const hasToday=todayTrades.length>0;
+              const pnlColor=isPos?'#22c55e':'#ef4444';
+              const bg=hasToday?(isPos?'rgba(34,197,94,0.06)':'rgba(239,68,68,0.06)'):'transparent';
+              const border=hasToday?(isPos?'#22c55e25':'#ef444425'):'#1a1f2e';
+              return`<div style="background:${bg};border:1px solid ${border};border-radius:8px;padding:12px 14px;margin-top:4px;">
+                <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px;">Today's P&amp;L</div>
+                <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">
+                  <div style="font-size:28px;font-weight:700;font-family:'DM Mono',monospace;color:${hasToday?pnlColor:'#374060'};letter-spacing:-.5px;line-height:1;">${hasToday?(isPos?'+':'')+fmtC(todayPnl):'–'}</div>
+                  ${hasToday?`
+                  <div style="display:flex;gap:12px;flex-wrap:wrap;">
+                    <div style="text-align:center;"><div style="font-size:9px;color:#374060;margin-bottom:1px;">Trades</div><div style="font-size:13px;font-weight:600;font-family:'DM Mono',monospace;color:#e2e8f0;">${todayTrades.length}</div></div>
+                    <div style="text-align:center;"><div style="font-size:9px;color:#374060;margin-bottom:1px;">WR</div><div style="font-size:13px;font-weight:600;font-family:'DM Mono',monospace;color:${todayWR>=50?'#22c55e':'#ef4444'}">${todayWR}%</div></div>
+                    <div style="text-align:center;"><div style="font-size:9px;color:#374060;margin-bottom:1px;">W/L</div><div style="font-size:13px;font-weight:600;font-family:'DM Mono',monospace;"><span style="color:#22c55e;">${todayWins}</span><span style="color:#374060;">/</span><span style="color:#ef4444;">${todayLosses}</span></div></div>
+                  </div>`:'<div style="font-size:11px;color:#374060;font-style:italic;">No trades today</div>'}
+                </div>
+              </div>`;
+            })()}
           `:`<div style="color:#4b5a7a;font-size:12px;">Set a starting balance in <span style="color:#3b82f6;cursor:pointer;" onclick="setTab('accounts',document.querySelectorAll('.nav-tab')[5])">Account Settings</span> to track balance.</div>`}
         </div>
 
@@ -1467,7 +1597,7 @@ function renderDashboard(trades){
       <div class="chart-card"><div class="chart-head"><span class="chart-title">Top Symbols</span></div><div id="symBreak"></div></div>
       <div class="chart-card"><div class="chart-head"><span class="chart-title">Today's Intraday P&amp;L</span><div style="display:flex;align-items:center;gap:8px;" id="todayChartMeta"></div></div><div style="position:relative;height:170px;"><canvas id="todayChart" role="img" aria-label="Today intraday PnL">Today's trades</canvas></div></div>
     </div>
-    ${renderGoalCards(activeAccts)}`;
+    </div>`;
   setTimeout(()=>{drawEquity(trades);drawDaily(trades);drawWL(wins.length,losses.length);drawSymbols(trades);drawHourly(trades);drawTodayIntraday(trades);renderDashCal(trades);checkGoalAchievements(true);},50);
 }
 
@@ -2098,6 +2228,43 @@ function renderAccountsView(){
 function showImportForAcct(id){state.selectedIds.clear();state.selectedIds.add(id);showImportModal();setTimeout(()=>document.getElementById('importAcctSelect').value=id,50);}
 function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
+
+// ── MOBILE NAVIGATION ─────────────────────────────────────────────────────────
+function toggleSidebar(){
+  const sidebar=document.getElementById ? document.querySelector('.sidebar') : null;
+  const overlay=document.getElementById('sidebarOverlay');
+  const hamburger=document.getElementById('hamburger');
+  if(!sidebar) return;
+  const isOpen=sidebar.classList.contains('open');
+  if(isOpen){ closeSidebar(); }
+  else {
+    sidebar.classList.add('open');
+    overlay.classList.add('open');
+    hamburger.classList.add('open');
+  }
+}
+
+function closeSidebar(){
+  const sidebar=document.querySelector('.sidebar');
+  const overlay=document.getElementById('sidebarOverlay');
+  const hamburger=document.getElementById('hamburger');
+  if(sidebar) sidebar.classList.remove('open');
+  if(overlay) overlay.classList.remove('open');
+  if(hamburger) hamburger.classList.remove('open');
+}
+
+function mobNav(tab, el){
+  // Update bottom nav active state
+  document.querySelectorAll('.mob-nav-btn').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  // Also sync desktop nav tabs
+  const tabIndex={'dashboard':0,'trades':1,'analytics':2,'drawdown':3,'calendar':4,'accounts':5};
+  const desktopTabs=document.querySelectorAll('.nav-tab');
+  if(desktopTabs[tabIndex[tab]]){
+    setTab(tab, desktopTabs[tabIndex[tab]]);
+  }
+  closeSidebar();
+}
 
 // ── CONFETTI ENGINE ───────────────────────────────────────────────────────────
 let confettiActive=false;
