@@ -241,8 +241,19 @@ input[type=file]{display:none;}
 .goal-popup-sub{font-size:14px;color:#c8a84a;margin-bottom:20px;}
 .goal-popup-amount{font-size:32px;font-weight:700;font-family:'DM Mono',monospace;color:#fff;margin-bottom:20px;}
 .goal-popup-close{padding:10px 28px;background:#f59e0b;color:#000;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;}
+/* GROUPS */
+.group-btn{display:flex;align-items:center;gap:7px;padding:7px 8px;border-radius:7px;cursor:pointer;font-size:12px;border:1px solid transparent;transition:all .15s;margin-bottom:3px;width:100%;}
+.group-btn:hover{background:#161b28;border-color:#1a1f2e;}
+.group-btn.active{border-color:#2a3558;background:#1a2035;}
+.group-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.group-name{flex:1;color:#c8d4e8;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.group-count{font-size:10px;color:#4b5a7a;}
+.add-group-btn{display:flex;align-items:center;gap:6px;padding:7px 8px;border-radius:7px;cursor:pointer;font-size:12px;color:#4b5a7a;border:1px dashed #1a2535;margin:4px 12px 0;transition:all .15s;}
+.add-group-btn:hover{border-color:#2563eb;color:#3b82f6;background:#0f1520;}
+.group-acct-check{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:6px;cursor:pointer;font-size:12px;color:#8090b0;margin-bottom:2px;}
+.group-acct-check:hover{background:#161b28;color:#c8d4e8;}
+.group-acct-check input{width:14px;height:14px;accent-color:#2563eb;cursor:pointer;}
 </style>
-</head>
 <body>
 <div class="app">
 <nav>
@@ -274,6 +285,9 @@ input[type=file]{display:none;}
         <span id="selText">0 selected</span>
         <span class="sel-clear" onclick="clearSelection()">Clear</span>
       </div>
+      <div class="sidebar-section-label" style="margin-top:12px;">Groups</div>
+      <div style="padding:0 12px;" id="groupsList"></div>
+      <div class="add-group-btn" onclick="showCreateGroup()">＋ New Group</div>
       <div class="sidebar-section-label" style="margin-top:12px;">Accounts</div>
       <div class="accounts-section" id="accountsList"></div>
       <div class="add-account-btn" onclick="showAddAccount()">＋ Add Account</div>
@@ -383,6 +397,25 @@ input[type=file]{display:none;}
     </div>
   </div>
 </div>
+<!-- GROUP MODAL -->
+<div class="modal-bg" id="groupModal">
+  <div class="modal">
+    <div class="modal-title" id="groupModalTitle">Create Group</div>
+    <input type="hidden" id="groupModalId"/>
+    <div class="modal-label">Group Name</div>
+    <input class="modal-input" id="groupName" placeholder="e.g. Apex Accounts, Funded, TopStep"/>
+    <div class="modal-label">Color</div>
+    <div class="color-row" id="groupColorRow"></div>
+    <div class="modal-label">Select Accounts</div>
+    <div id="groupAcctList" style="max-height:200px;overflow-y:auto;background:#161b28;border-radius:8px;padding:6px;margin-bottom:14px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('groupModal')">Cancel</button>
+      <button class="btn btn-danger" id="groupDeleteBtn" style="display:none;" onclick="deleteGroup()">Delete Group</button>
+      <button class="btn btn-primary" onclick="saveGroup()">Save Group</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-bg" id="importModal">
   <div class="modal">
     <div class="modal-title">Import Trades</div>
@@ -425,7 +458,7 @@ const sb={
   async del(t,q){const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}${q}`,{method:'DELETE',headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`,'Content-Type':'application/json'}});if(!r.ok)throw new Error(await r.text());}
 };
 
-let state={accounts:[],selectedIds:new Set(),activeTab:'dashboard'};
+let state={accounts:[],groups:[],selectedIds:new Set(),activeGroupId:null,activeTab:'dashboard'};
 let charts={};
 const COLORS=[{bg:'#1d4ed8'},{bg:'#16a34a'},{bg:'#9333ea'},{bg:'#ea580c'},{bg:'#0891b2'},{bg:'#e11d48'},{bg:'#ca8a04'},{bg:'#475569'}];
 let selectedColor=COLORS[0];
@@ -519,10 +552,11 @@ function calcTrailingDD(acct) {
 async function loadData(){
   setSyncStatus('syncing','Loading...');
   try{
-    const[accounts,trades,withdrawals]=await Promise.all([
+    const[accounts,trades,withdrawals,groups]=await Promise.all([
       sb.get('accounts','?order=created_at.asc'),
       sb.get('trades','?order=date.asc'),
-      sb.get('withdrawals','?order=date.asc')
+      sb.get('withdrawals','?order=date.asc'),
+      sb.get('groups','?order=created_at.asc')
     ]);
     state.accounts=accounts.map(a=>({
       ...a,
@@ -532,6 +566,7 @@ async function loadData(){
       trades:trades.filter(t=>t.account_id===a.id).map(t=>({date:new Date(t.date),symbol:t.symbol,side:t.side,qty:t.qty,entry:t.entry,exit:t.exit,pnl:t.pnl,fees:t.fees,netPnl:t.net_pnl,dbId:t.id})),
       withdrawals:withdrawals.filter(w=>w.account_id===a.id).map(w=>({id:w.id,amount:parseFloat(w.amount),date:new Date(w.date),note:w.note||''}))
     }));
+    state.groups=groups.map(g=>({...g,account_ids:g.account_ids||[]}));
     setSyncStatus('ok','Synced');
     document.getElementById('emptyTitle').textContent=state.accounts.length?'No trades yet':'No accounts yet';
     document.getElementById('emptySub').textContent=state.accounts.length?'Import a Tradovate CSV to get started.':'Create your first account to get started.';
@@ -648,6 +683,106 @@ function currentBalance(acct){
   const pnl=acct.trades.reduce((s,t)=>s+t.netPnl,0);
   const wd=totalWithdrawals(acct);
   return acct.starting_balance+pnl-wd;
+}
+
+// ── GROUP CRUD ────────────────────────────────────────────────────────────────
+let groupSelectedColor = '#3b82f6';
+const GROUP_COLORS = ['#3b82f6','#22c55e','#9333ea','#ea580c','#0891b2','#e11d48','#ca8a04','#475569'];
+
+function showCreateGroup(){
+  document.getElementById('groupModalTitle').textContent='Create Group';
+  document.getElementById('groupModalId').value='';
+  document.getElementById('groupName').value='';
+  document.getElementById('groupDeleteBtn').style.display='none';
+  groupSelectedColor=GROUP_COLORS[0];
+  renderGroupColorSwatches();
+  renderGroupAcctList([]);
+  openModal('groupModal');
+}
+
+function showEditGroup(id){
+  const g=state.groups.find(x=>x.id===id);if(!g)return;
+  document.getElementById('groupModalTitle').textContent='Edit Group';
+  document.getElementById('groupModalId').value=id;
+  document.getElementById('groupName').value=g.name;
+  document.getElementById('groupDeleteBtn').style.display='inline-flex';
+  groupSelectedColor=g.color||GROUP_COLORS[0];
+  renderGroupColorSwatches();
+  renderGroupAcctList(g.account_ids||[]);
+  openModal('groupModal');
+}
+
+function renderGroupColorSwatches(){
+  document.getElementById('groupColorRow').innerHTML=GROUP_COLORS.map((c,i)=>
+    `<div class="color-swatch${c===groupSelectedColor?' selected':''}" style="background:${c}" onclick="pickGroupColor('${c}')"></div>`
+  ).join('');
+}
+function pickGroupColor(c){groupSelectedColor=c;renderGroupColorSwatches();}
+
+function renderGroupAcctList(selectedIds){
+  document.getElementById('groupAcctList').innerHTML=state.accounts.map(a=>`
+    <label class="group-acct-check">
+      <input type="checkbox" value="${a.id}" ${selectedIds.includes(a.id)?'checked':''}>
+      <div style="width:8px;height:8px;border-radius:50%;background:${a.color};"></div>
+      ${a.name}
+    </label>`).join('');
+}
+
+function getGroupCheckedIds(){
+  return [...document.querySelectorAll('#groupAcctList input:checked')].map(el=>el.value);
+}
+
+async function saveGroup(){
+  const name=document.getElementById('groupName').value.trim();
+  if(!name){toast('Please enter a group name','error');return;}
+  const accountIds=getGroupCheckedIds();
+  if(!accountIds.length){toast('Please select at least one account','error');return;}
+  const editId=document.getElementById('groupModalId').value;
+  setSyncStatus('syncing','Saving...');
+  try{
+    if(editId){
+      await sb.patch('groups',`?id=eq.${editId}`,{name,color:groupSelectedColor,account_ids:accountIds});
+      const g=state.groups.find(x=>x.id===editId);
+      g.name=name;g.color=groupSelectedColor;g.account_ids=accountIds;
+      toast('Group updated','success');
+    } else {
+      const g={id:'grp_'+Date.now(),name,color:groupSelectedColor,account_ids:accountIds,created_at:new Date().toISOString()};
+      await sb.post('groups',g);
+      state.groups.push(g);
+      toast('Group created','success');
+    }
+    setSyncStatus('ok','Synced');
+    closeModal('groupModal');
+    renderAll();
+  }catch(e){setSyncStatus('err','Save failed');toast('Failed: '+e.message,'error');}
+}
+
+async function deleteGroup(){
+  const id=document.getElementById('groupModalId').value;
+  if(!confirm('Delete this group?'))return;
+  setSyncStatus('syncing','Deleting...');
+  try{
+    await sb.del('groups',`?id=eq.${id}`);
+    state.groups=state.groups.filter(g=>g.id!==id);
+    if(state.activeGroupId===id){state.activeGroupId=null;state.selectedIds.clear();}
+    setSyncStatus('ok','Synced');
+    toast('Group deleted','success');
+    closeModal('groupModal');
+    renderAll();
+  }catch(e){setSyncStatus('err','Delete failed');toast('Failed: '+e.message,'error');}
+}
+
+function selectGroup(id){
+  const g=state.groups.find(x=>x.id===id);if(!g)return;
+  state.activeGroupId=id;
+  state.selectedIds=new Set(g.account_ids);
+  renderAll();
+}
+
+function clearGroup(){
+  state.activeGroupId=null;
+  state.selectedIds.clear();
+  renderAll();
 }
 
 function showEditDD(id){
@@ -836,10 +971,10 @@ function parseRow(line){const res=[];let cur='',inQ=false;for(let c of line){if(
 
 // ── SELECTION ─────────────────────────────────────────────────────────────────
 function isAllSelected(){return state.selectedIds.size===0||state.selectedIds.size===state.accounts.length;}
-function selectAll(){state.selectedIds.clear();renderSidebar();renderContent();}
-function clearSelection(){state.selectedIds.clear();renderSidebar();renderContent();}
-function toggleAccount(id,e){e.stopPropagation();if(state.selectedIds.has(id))state.selectedIds.delete(id);else state.selectedIds.add(id);renderSidebar();renderContent();}
-function soloAccount(id){state.selectedIds.clear();state.selectedIds.add(id);renderSidebar();renderContent();}
+function selectAll(){state.selectedIds.clear();state.activeGroupId=null;renderSidebar();renderContent();}
+function clearSelection(){state.selectedIds.clear();state.activeGroupId=null;renderSidebar();renderContent();}
+function toggleAccount(id,e){e.stopPropagation();state.activeGroupId=null;if(state.selectedIds.has(id))state.selectedIds.delete(id);else state.selectedIds.add(id);renderSidebar();renderContent();}
+function soloAccount(id){state.selectedIds.clear();state.selectedIds.add(id);state.activeGroupId=null;renderSidebar();renderContent();}
 function getActiveTrades(){const active=getActiveAccounts();return active.flatMap(a=>a.trades.map(t=>({...t,accountId:a.id,accountName:a.name,accountColor:a.color})));}
 function getActiveAccounts(){return isAllSelected()?state.accounts:state.accounts.filter(a=>state.selectedIds.has(a.id));}
 function getSelectionLabel(){if(isAllSelected())return`All Accounts <span style="font-size:12px;color:#374060;font-weight:400;">(${state.accounts.length})</span>`;const active=getActiveAccounts();if(active.length===1)return active[0].name;return`<span style="font-size:14px;">${active.length} Accounts</span>`;}
@@ -856,10 +991,33 @@ function renderSidebar(){
   const allPnlEl=document.getElementById('allPnl');
   allPnlEl.style.color=totalPnl>0?'#22c55e':totalPnl<0?'#ef4444':'#6b7898';
   allPnlEl.textContent=totalBal?fmtC(totalBal):state.accounts.length?fmtM(totalPnl):'–';
-  document.getElementById('allBadge').classList.toggle('active',isAllSelected());
+  document.getElementById('allBadge').classList.toggle('active',isAllSelected()&&!state.activeGroupId);
+
   const selBar=document.getElementById('selBar'),selText=document.getElementById('selText');
-  if(isAllSelected()){selBar.classList.remove('multi');selText.textContent=`${state.accounts.length} accounts`;}
-  else{selBar.classList.add('multi');selText.innerHTML=`<span class="sel-count">${state.selectedIds.size}</span> selected`;}
+  if(state.activeGroupId){
+    const g=state.groups.find(x=>x.id===state.activeGroupId);
+    selBar.classList.add('multi');
+    selText.innerHTML=`<span style="color:${g?.color||'#3b82f6'}">${g?.name||'Group'}</span>`;
+  } else if(isAllSelected()){
+    selBar.classList.remove('multi');selText.textContent=`${state.accounts.length} accounts`;
+  } else {
+    selBar.classList.add('multi');selText.innerHTML=`<span class="sel-count">${state.selectedIds.size}</span> selected`;
+  }
+
+  // Render groups
+  document.getElementById('groupsList').innerHTML=state.groups.map(g=>{
+    const isActive=state.activeGroupId===g.id;
+    const accts=state.accounts.filter(a=>g.account_ids.includes(a.id));
+    const gPnl=accts.reduce((s,a)=>s+a.trades.reduce((ss,t)=>ss+t.netPnl,0),0);
+    return`<div class="group-btn${isActive?' active':''}" onclick="selectGroup('${g.id}')">
+      <div class="group-dot" style="background:${g.color};"></div>
+      <div class="group-name">${g.name}</div>
+      <div class="group-count">${accts.length}</div>
+      <div onclick="event.stopPropagation();showEditGroup('${g.id}')" style="font-size:10px;color:#374060;padding:2px 5px;border-radius:3px;cursor:pointer;" onmouseover="this.style.color='#c8d4e8'" onmouseout="this.style.color='#374060'">✎</div>
+    </div>`;
+  }).join('');
+
+  // Render accounts
   document.getElementById('accountsList').innerHTML=state.accounts.map(a=>{
     const netPnl=a.trades.reduce((s,t)=>s+t.netPnl,0);
     const grossPnl=a.trades.reduce((s,t)=>s+t.pnl,0);
@@ -868,17 +1026,15 @@ function renderSidebar(){
     const dd=calcTrailingDD(a);
     const isBlown=dd&&dd.blown;
     const goalAchieved=a.profit_goal&&grossPnl>=a.profit_goal;
-    const hasBal=!!a.starting_balance;
-    const currentBal=currentBalance(a);
-    const netPnl2=a.trades.reduce((s,t)=>s+t.netPnl,0);
-    const pctChange=hasBal&&a.starting_balance?((netPnl2-totalWithdrawals(a))/a.starting_balance)*100:null;
+    const currentBal2=currentBalance(a);
+    const pctChange=a.starting_balance?((netPnl-totalWithdrawals(a))/a.starting_balance)*100:null;
     return`<div class="acct-row${soloOnly?' solo-active':''}" onclick="soloAccount('${a.id}')">
       <div class="acct-checkbox${checked?' checked':''}" onclick="toggleAccount('${a.id}',event)"></div>
       <div class="acct-avatar" style="background:${a.color}20;color:${a.color}">${a.name[0].toUpperCase()}</div>
       <div class="acct-info">
         <div class="acct-name">${a.name}</div>
-        ${currentBal!==null
-          ?`<div class="acct-pnl ${netPnl>0?'pos':netPnl<0?'neg':'neutral'}" style="font-size:11px;">${fmtC(currentBal)}</div>
+        ${currentBal2!==null
+          ?`<div class="acct-pnl ${netPnl>0?'pos':netPnl<0?'neg':'neutral'}" style="font-size:11px;">${fmtC(currentBal2)}</div>
             <div style="font-size:9px;color:${netPnl>=0?'#22c55e':'#ef4444'};font-family:'DM Mono',monospace;">${netPnl>=0?'+':''}${fmtM(netPnl)} (${pctChange>=0?'+':''}${pctChange.toFixed(1)}%)</div>`
           :`<div class="acct-pnl ${netPnl>0?'pos':netPnl<0?'neg':'neutral'}">${a.trades.length?fmtM(netPnl):'No trades'}</div>`
         }
@@ -1096,23 +1252,44 @@ function renderDashboard(trades){
             <span id="acctDropdownLabel">${getSelectionLabel()}</span>
             <span style="margin-left:auto;color:#4b5a7a;font-size:10px;">▼</span>
           </button>
-          <div id="acctDropdown" style="display:none;position:absolute;top:calc(100% + 6px);left:0;background:#0f1220;border:1px solid #1e2540;border-radius:10px;padding:6px;min-width:240px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,.5);">
-            <div onclick="selectAll();closeAcctDropdown()" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:12px;color:#c8d4e8;${isAllSelected()?'background:#1a2035;':''}" onmouseover="this.style.background='#161b28'" onmouseout="this.style.background='${isAllSelected()?'#1a2035':'transparent'}'">
+          <div id="acctDropdown" style="display:none;position:absolute;top:calc(100% + 6px);left:0;background:#0f1220;border:1px solid #1e2540;border-radius:10px;padding:6px;min-width:260px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,.5);max-height:420px;overflow-y:auto;">
+            <!-- ALL -->
+            <div onclick="selectAll();closeAcctDropdown()" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:12px;color:#c8d4e8;${isAllSelected()&&!state.activeGroupId?'background:#1a2035;':''}" onmouseover="this.style.background='#161b28'" onmouseout="this.style.background='${isAllSelected()&&!state.activeGroupId?'#1a2035':'transparent'}'">
               <div style="width:20px;height:20px;border-radius:5px;background:#1e2a45;display:flex;align-items:center;justify-content:center;font-size:10px;">⊞</div>
               All Accounts
-              ${isAllSelected()?'<span style="margin-left:auto;color:#3b82f6;font-size:10px;">✓</span>':''}
+              ${isAllSelected()&&!state.activeGroupId?'<span style="margin-left:auto;color:#3b82f6;font-size:10px;">✓</span>':''}
             </div>
-            <div style="border-top:1px solid #1e2540;margin:4px 0;"></div>
+            <!-- GROUPS -->
+            ${state.groups.length?`
+            <div style="font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:1px;padding:8px 10px 4px;font-weight:500;">Groups</div>
+            ${state.groups.map(g=>{
+              const isActive=state.activeGroupId===g.id;
+              const accts=state.accounts.filter(a=>g.account_ids.includes(a.id));
+              const gPnl=accts.reduce((s,a)=>s+a.trades.reduce((ss,t)=>ss+t.netPnl,0),0);
+              return`<div onclick="selectGroup('${g.id}');closeAcctDropdown()" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:12px;${isActive?'background:#1a2035;':''}" onmouseover="this.style.background='#161b28'" onmouseout="this.style.background='${isActive?'#1a2035':'transparent'}'">
+                <div style="width:20px;height:20px;border-radius:5px;background:${g.color}20;display:flex;align-items:center;justify-content:center;">
+                  <div style="width:8px;height:8px;border-radius:50%;background:${g.color};"></div>
+                </div>
+                <div style="flex:1;"><div style="color:#c8d4e8;">${g.name}</div><div style="font-size:10px;color:#4b5a7a;">${accts.length} accounts · <span style="font-family:'DM Mono',monospace;color:${gPnl>=0?'#22c55e':'#ef4444'}">${fmtM(gPnl)}</span></div></div>
+                ${isActive?'<span style="color:#3b82f6;font-size:10px;">✓</span>':''}
+              </div>`;
+            }).join('')}
+            <div style="border-top:1px solid #1e2540;margin:4px 0;"></div>`:''}
+            <!-- INDIVIDUAL ACCOUNTS -->
+            <div style="font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:1px;padding:8px 10px 4px;font-weight:500;">Individual Accounts</div>
             ${state.accounts.map(a=>{
-              const isSelected=!isAllSelected()&&state.selectedIds.has(a.id);
+              const isSelected=!isAllSelected()&&!state.activeGroupId&&state.selectedIds.has(a.id);
               const aPnl=a.trades.reduce((s,t)=>s+t.netPnl,0);
-              const aBal=a.starting_balance?fmtC(a.starting_balance+aPnl):fmtM(aPnl);
+              const aBal=currentBalance(a)?fmtC(currentBalance(a)):fmtM(aPnl);
               return`<div onclick="toggleAcctFromDropdown('${a.id}')" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:12px;${isSelected?'background:#1a2035;':''}" onmouseover="this.style.background='#161b28'" onmouseout="this.style.background='${isSelected?'#1a2035':'transparent'}'">
                 <div style="width:20px;height:20px;border-radius:5px;background:${a.color}20;color:${a.color};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;">${a.name[0]}</div>
                 <div style="flex:1;"><div style="color:#c8d4e8;">${a.name}</div><div style="font-size:10px;font-family:'DM Mono',monospace;color:${aPnl>=0?'#22c55e':'#ef4444'}">${aBal}</div></div>
                 ${isSelected?'<span style="color:#3b82f6;font-size:10px;">✓</span>':''}
               </div>`;
             }).join('')}
+            <div style="border-top:1px solid #1e2540;margin:4px 0;padding-top:4px;">
+              <div onclick="showCreateGroup();closeAcctDropdown()" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;cursor:pointer;font-size:11px;color:#3b82f6;" onmouseover="this.style.background='#0f1525'" onmouseout="this.style.background='transparent'">＋ New Group</div>
+            </div>
           </div>
         </div>
         <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;" onclick="showImportModal()">↑ Import CSV</button>
@@ -1168,19 +1345,25 @@ function renderDashboard(trades){
                 <span style="font-size:11px;color:#c8d4e8;">${a.name}</span>
                 ${achieved?'<span style="font-size:10px;background:#1a1200;color:#f59e0b;padding:1px 6px;border-radius:4px;border:1px solid #f59e0b40;margin-left:4px;">🏆 Done</span>':''}
               </div>
-              <!-- BIG P&L AMOUNT -->
-              <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px;">
-                <div style="font-size:32px;font-weight:700;font-family:'DM Mono',monospace;color:${pnlColor};letter-spacing:-.5px;line-height:1;">${aPnl>=0?'+':''}${fmtC(aPnl)}</div>
-                <div style="font-size:13px;color:#374060;">/ ${fmtC(goal)}</div>
+              <!-- Current P&L + Target (smaller) -->
+              <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px;">
+                <div style="font-size:16px;font-weight:600;font-family:'DM Mono',monospace;color:${pnlColor};">${aPnl>=0?'+':''}${fmtC(aPnl)}</div>
+                <div style="font-size:11px;color:#374060;">/ ${fmtC(goal)}</div>
+                <div style="font-size:10px;color:#4b5a7a;margin-left:auto;">${pct.toFixed(1)}%</div>
               </div>
               <!-- Progress bar -->
-              <div style="height:10px;background:#161b28;border-radius:5px;overflow:hidden;margin-bottom:6px;">
+              <div style="height:10px;background:#161b28;border-radius:5px;overflow:hidden;margin-bottom:10px;">
                 <div style="height:100%;width:${pct.toFixed(1)}%;background:${fillColor};border-radius:5px;transition:width .5s;${achieved?'box-shadow:0 0 8px #f59e0b60':''}"></div>
               </div>
-              <!-- Meta row -->
-              <div style="display:flex;justify-content:space-between;font-size:10px;">
-                <span style="color:#4b5a7a;">${pct.toFixed(1)}% complete</span>
-                <span style="color:${achieved?'#f59e0b':remaining>0?'#ef4444':'#22c55e'};font-weight:500;">${achieved?'Goal reached! 🎉':fmtC(remaining)+' to go'}</span>
+              <!-- BIG "to go" amount -->
+              <div style="display:flex;align-items:baseline;justify-content:flex-end;">
+                ${achieved
+                  ?`<div style="font-size:22px;font-weight:700;font-family:'DM Mono',monospace;color:#f59e0b;">Goal reached! 🎉</div>`
+                  :`<div style="text-align:right;">
+                      <div style="font-size:11px;color:#4b5a7a;margin-bottom:2px;">Amount to go</div>
+                      <div style="font-size:28px;font-weight:700;font-family:'DM Mono',monospace;color:#ef4444;letter-spacing:-.5px;">${fmtC(remaining)}</div>
+                    </div>`
+                }
               </div>
             </div>`;
           }).join('')
@@ -1311,13 +1494,12 @@ function closeAcctDropdown(){
   if(d) d.style.display='none';
 }
 function toggleAcctFromDropdown(id){
-  // If currently all selected, start fresh selection with just this one
+  state.activeGroupId=null;
   if(isAllSelected()){
     state.selectedIds.clear();
     state.selectedIds.add(id);
   } else if(state.selectedIds.has(id)){
     state.selectedIds.delete(id);
-    // If nothing left, go back to all
     if(state.selectedIds.size===0) state.selectedIds.clear();
   } else {
     state.selectedIds.add(id);
