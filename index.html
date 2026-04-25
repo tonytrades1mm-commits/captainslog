@@ -2072,36 +2072,68 @@ function launchConfetti(){
   const ctx=canvas.getContext('2d');
   confettiActive=true;
   confettiPieces=[];
-  const colors=['#f59e0b','#22c55e','#3b82f6','#ec4899','#a855f7','#ef4444','#fff','#fbbf24'];
-  for(let i=0;i<160;i++){
+
+  // Money symbols and bills
+  const moneySymbols=['💵','💴','💶','💷','💰','💸','🤑','💵','💵','💵'];
+  const startTime=Date.now();
+  const duration=3200; // 3.2 seconds total
+
+  // Spawn 80 money pieces staggered across 3 seconds
+  for(let i=0;i<80;i++){
     confettiPieces.push({
-      x:Math.random()*canvas.width,
-      y:-10-Math.random()*200,
-      w:6+Math.random()*8,
-      h:4+Math.random()*6,
-      color:colors[Math.floor(Math.random()*colors.length)],
-      vx:(Math.random()-0.5)*6,
-      vy:2+Math.random()*5,
-      rot:Math.random()*360,
-      rotV:(Math.random()-0.5)*8,
-      opacity:1
+      x: Math.random()*canvas.width,
+      y: -40 - Math.random()*canvas.height, // start above screen, staggered
+      vy: 1.2 + Math.random()*1.8,           // slow fall
+      vx: (Math.random()-0.5)*1.2,           // slight drift
+      rot: (Math.random()-0.5)*20,            // tilt
+      rotV: (Math.random()-0.5)*0.8,          // gentle spin
+      size: 22 + Math.random()*18,            // 22–40px
+      symbol: moneySymbols[Math.floor(Math.random()*moneySymbols.length)],
+      opacity: 1,
+      delay: Math.random()*2000              // stagger spawn over 2 seconds
     });
   }
+
   function frame(){
     if(!confettiActive)return;
+    const elapsed=Date.now()-startTime;
     ctx.clearRect(0,0,canvas.width,canvas.height);
+
     confettiPieces.forEach(p=>{
-      p.x+=p.vx;p.y+=p.vy;p.rot+=p.rotV;p.vy+=0.08;
-      if(p.y>canvas.height*0.75)p.opacity-=0.015;
-      ctx.save();ctx.globalAlpha=Math.max(0,p.opacity);
-      ctx.translate(p.x,p.y);ctx.rotate(p.rot*Math.PI/180);
-      ctx.fillStyle=p.color;
-      ctx.fillRect(-p.w/2,-p.h/2,p.w,p.h);
+      // Respect spawn delay
+      if(elapsed<p.delay) return;
+
+      p.x+=p.vx;
+      p.y+=p.vy;
+      p.rot+=p.rotV;
+
+      // Fade out in last 800ms of duration
+      const remaining=duration-elapsed;
+      if(remaining<800) p.opacity=Math.max(0,remaining/800);
+
+      // Also fade if fallen past screen
+      if(p.y>canvas.height+40) p.opacity=0;
+
+      if(p.opacity<=0) return;
+
+      ctx.save();
+      ctx.globalAlpha=p.opacity;
+      ctx.translate(p.x,p.y);
+      ctx.rotate(p.rot*Math.PI/180);
+      ctx.font=`${p.size}px serif`;
+      ctx.textAlign='center';
+      ctx.textBaseline='middle';
+      ctx.fillText(p.symbol,0,0);
       ctx.restore();
     });
-    confettiPieces=confettiPieces.filter(p=>p.opacity>0);
-    if(confettiPieces.length>0)requestAnimationFrame(frame);
-    else{canvas.style.display='none';confettiActive=false;}
+
+    if(elapsed<duration){
+      requestAnimationFrame(frame);
+    } else {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      canvas.style.display='none';
+      confettiActive=false;
+    }
   }
   requestAnimationFrame(frame);
 }
