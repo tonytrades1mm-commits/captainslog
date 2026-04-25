@@ -924,6 +924,13 @@ function renderDashboard(trades){
       <div class="chart-card"><div class="chart-head"><span class="chart-title">Top Symbols</span></div><div id="symBreak"></div></div>
       <div class="chart-card"><div class="chart-head"><span class="chart-title">P&amp;L by Hour</span></div><div style="position:relative;height:170px;"><canvas id="hrChart" role="img" aria-label="Hourly PnL">Hourly</canvas></div></div>
     </div>
+    <div class="chart-card" style="margin-bottom:14px;">
+      <div class="chart-head">
+        <span class="chart-title">Today's Intraday P&amp;L</span>
+        <div style="display:flex;align-items:center;gap:8px;" id="todayChartMeta"></div>
+      </div>
+      <div style="position:relative;height:180px;"><canvas id="todayChart" role="img" aria-label="Today intraday PnL">Today's trades</canvas></div>
+    </div>
     <div class="chart-card">
       <div class="chart-head">
         <span class="chart-title">Monthly Calendar</span>
@@ -937,7 +944,7 @@ function renderDashboard(trades){
       </div>
       <div id="dashCalGrid"></div>
     </div>`;
-  setTimeout(()=>{drawEquity(trades);drawDaily(trades);drawWL(wins.length,losses.length);drawSymbols(trades);drawHourly(trades);renderDashCal(trades);},50);
+  setTimeout(()=>{drawEquity(trades);drawDaily(trades);drawWL(wins.length,losses.length);drawSymbols(trades);drawHourly(trades);drawTodayIntraday(trades);renderDashCal(trades);},50);
 }
 
 function renderSelBreakdown(){
@@ -1097,6 +1104,131 @@ function drawDaily(trades){const c=document.getElementById('dayChart');if(!c)ret
 function drawWL(w,l){const c=document.getElementById('wlChart');if(!c)return;dc('wl');charts.wl=new Chart(c,{type:'doughnut',data:{labels:['Wins','Losses'],datasets:[{data:[w,l],backgroundColor:['#22c55e','#ef4444'],borderColor:'#0c0e14',borderWidth:3}]},options:{responsive:true,maintainAspectRatio:false,cutout:'65%',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.label+': '+c.raw}}}}});}
 function drawSymbols(trades){const el=document.getElementById('symBreak');if(!el)return;const m={};trades.forEach(t=>{if(!m[t.symbol])m[t.symbol]={pnl:0};m[t.symbol].pnl+=t.pnl;});const sorted=Object.entries(m).sort((a,b)=>Math.abs(b[1].pnl)-Math.abs(a[1].pnl)).slice(0,7);if(!sorted.length)return;const max=Math.max(...sorted.map(s=>Math.abs(s[1].pnl)));el.innerHTML=sorted.map(([sym,d])=>`<div class="prog-row"><div class="prog-label" style="font-family:'DM Mono',monospace;font-size:10px;">${sym}</div><div class="prog-track"><div class="prog-fill ${d.pnl>=0?'g':'r'}" style="width:${(Math.abs(d.pnl)/max*100).toFixed(0)}%"></div></div><div class="prog-val" style="font-size:10px;color:${d.pnl>=0?'#22c55e':'#ef4444'}">${fmtM(d.pnl)}</div></div>`).join('');}
 function drawHourly(trades){const c=document.getElementById('hrChart');if(!c)return;dc('hr');const byHr={};for(let h=8;h<=17;h++)byHr[h]=0;trades.forEach(t=>{const h=t.date.getHours();byHr[h]=(byHr[h]||0)+t.pnl;});const labels=Object.keys(byHr).map(h=>h+':00');const data=Object.values(byHr).map(v=>parseFloat(v.toFixed(2)));charts.hr=new Chart(c,{type:'bar',data:{labels,datasets:[{data,backgroundColor:data.map(v=>v>=0?'#22c55e':'#ef4444'),borderRadius:2}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmt(c.raw)}}},scales:{x:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9}}},y:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9},callback:v=>'$'+v}}}}});}
+
+// ── INTRADAY EQUITY CURVE ─────────────────────────────────────────────────────
+function buildIntradayDatasets(dayTrades, activeAccounts){
+  // Sort trades by time
+  const sorted=[...dayTrades].sort((a,b)=>a.date-b.date);
+
+  // Combined dataset
+  let cum=0;
+  const combinedData=[];
+  const combinedLabels=[];
+  sorted.forEach(t=>{
+    cum+=t.pnl;
+    combinedLabels.push(t.date.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}));
+    combinedData.push(parseFloat(cum.toFixed(2)));
+  });
+
+  const finalColor=cum>=0?'#22c55e':'#ef4444';
+  const datasets=[{
+    label:'Combined',
+    data:combinedData,
+    borderColor:finalColor,
+    borderWidth:2.5,
+    pointRadius:combinedData.length<=20?4:2,
+    pointBackgroundColor:finalColor,
+    fill:true,
+    backgroundColor:cum>=0?'rgba(34,197,94,0.08)':'rgba(239,68,68,0.08)',
+    tension:.3,
+  }];
+
+  // Per-account datasets (only if multiple accounts have trades that day)
+  const acctIds=[...new Set(sorted.map(t=>t.accountId))];
+  if(acctIds.length>1){
+    acctIds.forEach(id=>{
+      const acct=activeAccounts.find(a=>a.id===id);
+      if(!acct)return;
+      let acctCum=0;
+      const acctData=sorted.map(t=>{
+        if(t.accountId===id) acctCum+=t.pnl;
+        return parseFloat(acctCum.toFixed(2));
+      });
+      datasets.push({
+        label:acct.name,
+        data:acctData,
+        borderColor:acct.color,
+        borderWidth:1.5,
+        borderDash:[4,3],
+        pointRadius:0,
+        fill:false,
+        tension:.3,
+      });
+    });
+  }
+
+  return{datasets,labels:combinedLabels,finalPnl:cum,tradeCount:sorted.length};
+}
+
+function drawTodayIntraday(allTrades){
+  const c=document.getElementById('todayChart');
+  const metaEl=document.getElementById('todayChartMeta');
+  if(!c)return;
+  dc('today');
+
+  const today=new Date().toDateString();
+  const todayTrades=allTrades.filter(t=>t.date.toDateString()===today);
+
+  if(!todayTrades.length){
+    metaEl.innerHTML=`<span style="font-size:11px;color:#374060;">No trades today</span>`;
+    // Draw empty state
+    charts.today=new Chart(c,{type:'line',data:{labels:['Start','End'],datasets:[{data:[0,0],borderColor:'#1e2535',borderWidth:1,pointRadius:0,fill:false}]},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9}}},y:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9},callback:v=>'$'+v}}}}});
+    return;
+  }
+
+  const activeAccounts=getActiveAccounts();
+  const{datasets,labels,finalPnl,tradeCount}=buildIntradayDatasets(todayTrades,activeAccounts);
+  const acctIds=[...new Set(todayTrades.map(t=>t.accountId))];
+
+  // Meta chips
+  metaEl.innerHTML=`
+    <span style="font-size:11px;color:${finalPnl>=0?'#22c55e':'#ef4444'};font-family:'DM Mono',monospace;font-weight:600;">${fmt(finalPnl)}</span>
+    <span style="font-size:10px;color:#4b5a7a;">${tradeCount} trades</span>
+    ${acctIds.length>1?acctIds.map(id=>{const a=activeAccounts.find(x=>x.id===id);return a?`<span style="font-size:10px;padding:2px 7px;border-radius:4px;background:${a.color}20;color:${a.color};">${a.name}</span>`:''}).join(''):''}
+  `;
+
+  charts.today=new Chart(c,{
+    type:'line',
+    data:{labels,datasets},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{display:datasets.length>1,labels:{color:'#6b7898',font:{size:10},boxWidth:20,padding:12}},
+        tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${fmt(ctx.raw)}`}}
+      },
+      scales:{
+        x:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9},maxTicksLimit:10}},
+        y:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9},callback:v=>'$'+v.toLocaleString()}}
+      }
+    }
+  });
+}
+
+function drawIntradayChart(canvasId, dayTrades, activeAccounts){
+  // Used in calendar day detail panel
+  const c=document.getElementById(canvasId);
+  if(!c)return;
+  dc(canvasId);
+  if(!dayTrades.length){charts[canvasId]=new Chart(c,{type:'line',data:{labels:['–'],datasets:[{data:[0],borderColor:'#1e2535',borderWidth:1,pointRadius:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{display:false},y:{display:false}}}});return;}
+  const{datasets,labels}=buildIntradayDatasets(dayTrades,activeAccounts);
+  charts[canvasId]=new Chart(c,{
+    type:'line',data:{labels,datasets},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{display:datasets.length>1,labels:{color:'#6b7898',font:{size:10},boxWidth:16,padding:10}},
+        tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${fmt(ctx.raw)}`}}
+      },
+      scales:{
+        x:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9},maxTicksLimit:10}},
+        y:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9},callback:v=>'$'+v.toLocaleString()}}
+      }
+    }
+  });
+}
 
 // ── ANALYTICS ─────────────────────────────────────────────────────────────────
 function renderAnalytics(trades){
@@ -1274,75 +1406,4 @@ function renderCalendar(preserveScroll=false){
         <div class="day-stat"><div class="day-stat-label">Trades</div><div class="day-stat-val" style="color:#e2e8f0;">${dayTrades.length}</div></div>
         <div class="day-stat"><div class="day-stat-label">Win Rate</div><div class="day-stat-val" style="color:${dayWR>=50?'#22c55e':'#ef4444'}">${dayWR}%</div></div>
         <div class="day-stat"><div class="day-stat-label">Avg Win</div><div class="day-stat-val" style="color:#22c55e;">${dayWins.length?fmt(dayAvgWin):'–'}</div></div>
-        <div class="day-stat"><div class="day-stat-label">Avg Loss</div><div class="day-stat-val" style="color:#ef4444;">${dayLosses.length?fmt(dayAvgLoss):'–'}</div></div>
-        <div class="day-stat"><div class="day-stat-label">Best Trade</div><div class="day-stat-val" style="color:#22c55e;">${dayWins.length?fmt(dayBest):'–'}</div></div>
-        <div class="day-stat"><div class="day-stat-label">Worst Trade</div><div class="day-stat-val" style="color:#ef4444;">${dayLosses.length?fmt(dayWorst):'–'}</div></div>
-        <div class="day-stat"><div class="day-stat-label">Fees Paid</div><div class="day-stat-val" style="color:#6b7898;">$${dayFees.toFixed(2)}</div></div>
-      </div>
-      ${dayTrades.length?`
-        <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;">Trade Breakdown</div>
-        ${dayTrades.map(t=>`
-          <div class="day-trade-row">
-            <div class="day-trade-sym">${t.symbol}</div>
-            <div class="day-trade-side"><span class="pill ${t.side==='Long'?'pill-l':'pill-s'}">${t.side.toUpperCase()}</span></div>
-            ${showAcctCol?`<div><span class="acct-chip" style="background:${t.accountColor}20;color:${t.accountColor}">${t.accountName}</span></div>`:''}
-            <div style="flex:1;font-family:'DM Mono',monospace;font-size:10px;color:#6b7898;">
-              ${t.entry?'@'+t.entry.toFixed(2):''}${t.exit&&t.exit>0?' → '+t.exit.toFixed(2):''} · ${t.qty} ct
-            </div>
-            <div style="font-size:10px;color:#4b5a7a;font-family:'DM Mono',monospace;min-width:60px;text-align:right;">
-              ${t.date.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})}
-            </div>
-            <div class="day-trade-pnl" style="color:${t.pnl>=0?'#22c55e':'#ef4444'}">${fmt(t.pnl)}</div>
-          </div>`).join('')}
-      `:`<div style="color:#4b5a7a;font-size:12px;text-align:center;padding:16px;">No trades on this day</div>`}
-    </div>`;
-  }
-
-  document.getElementById('calendarView').innerHTML=`
-    <div class="filter-bar">
-      <div class="page-title">Calendar</div>
-      <div class="spacer"></div>
-      <div class="cal-month-nav">
-        <button class="cal-nav-btn" onclick="calNav(-1)">‹</button>
-        <div style="font-size:13px;font-weight:500;color:#c8d4e8;min-width:140px;text-align:center;">${monthName}</div>
-        <button class="cal-nav-btn" onclick="calNav(1)">›</button>
-        <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;margin-left:4px;" onclick="calYear=new Date().getFullYear();calMonth=new Date().getMonth();calSelectedDay=null;renderCalendar()">Today</button>
-      </div>
-    </div>
-    ${acctBar}
-    <div class="chart-card"><div class="cal-grid">${cal}</div></div>
-    ${detailHTML}`;
-}
-
-function renderAccountsView(){
-  document.getElementById('emptyState').style.display='none';
-  document.getElementById('accountsView').style.display='block';
-  document.getElementById('accountsView').innerHTML=`<div class="filter-bar"><div class="page-title">Manage Accounts</div><div class="spacer"></div><button class="btn btn-primary" onclick="showAddAccount()">+ Add Account</button></div>${!state.accounts.length?'<div class="empty-state"><div class="empty-icon">🗂</div><div class="empty-title">No accounts yet</div></div>':state.accounts.map(a=>{
-    const t=a.trades,pnl=t.reduce((s,x)=>s+x.netPnl,0),wins=t.filter(x=>x.pnl>0).length;
-    const wr=t.length?(wins/t.length*100).toFixed(1):'–';
-    const dd=calcTrailingDD(a);
-    const isBlown=dd&&dd.blown;
-    return`<div class="acct-mgr-row${isBlown?' blown':''}">
-      <div style="width:38px;height:38px;border-radius:9px;background:${a.color}20;color:${a.color};font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${a.name[0].toUpperCase()}</div>
-      <div class="acct-mgr-info">
-        <div class="acct-mgr-name">${a.name}${isBlown?'<span style="font-size:10px;background:#2b0808;color:#ef4444;padding:2px 6px;border-radius:4px;font-weight:500;">BLOWN</span>':''}</div>
-        <div class="acct-mgr-meta">${a.type} · ${t.length} trades · WR: ${wr}${wr!=='–'?'%':''}${dd?` · Floor: ${fmtC(dd.currentFloor)} · Buffer: ${fmtC(dd.distanceToFloor)}`:''}</div>
-      </div>
-      <div style="font-family:'DM Mono',monospace;font-size:13px;font-weight:500;color:${pnl>=0?'#22c55e':'#ef4444'};margin-right:8px;">${fmtM(pnl)}</div>
-      <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;" onclick="soloAccount('${a.id}');setTab('dashboard',document.querySelectorAll('.nav-tab')[0])">View</button>
-      <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="showEditDD('${a.id}')">DD Settings</button>
-      <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="showImportForAcct('${a.id}')">↑ Import</button>
-      <button class="btn btn-danger" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="deleteAccount('${a.id}')">Delete</button>
-    </div>`;
-  }).join('')}`;
-}
-
-function showImportForAcct(id){state.selectedIds.clear();state.selectedIds.add(id);showImportModal();setTimeout(()=>document.getElementById('importAcctSelect').value=id,50);}
-function openModal(id){document.getElementById(id).classList.add('open');}
-function closeModal(id){document.getElementById(id).classList.remove('open');}
-
-renderColorSwatches();
-loadData();
-</script>
-</body>
-</html>
+        <div class="day-stat"><div cla
