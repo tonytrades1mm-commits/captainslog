@@ -334,9 +334,9 @@ input[type=file]{display:none;}
     <div class="modal-hint">The drawdown floor trails up with daily profits and locks once it reaches your starting balance.</div>
     <hr class="modal-divider">
     <div style="font-size:12px;color:#6b7898;margin-bottom:14px;">Profit Goal (optional)</div>
-    <div class="modal-label">Profit Target ($)</div>
-    <input class="modal-input" id="acctProfitGoal" type="number" placeholder="e.g. 3000"/>
-    <div class="modal-hint">Set a profit target. When you hit it, we'll celebrate! 🎉 Leave blank to skip.</div>
+    <div class="modal-label">Profit Target Balance ($)</div>
+    <input class="modal-input" id="acctProfitGoal" type="number" placeholder="e.g. 53000"/>
+    <div class="modal-hint">Set a target account balance. When your balance hits this amount we'll celebrate! Leave blank to skip.</div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('addAccountModal')">Cancel</button>
       <button class="btn btn-primary" onclick="createAccount()">Create Account</button>
@@ -349,9 +349,9 @@ input[type=file]{display:none;}
   <div class="modal">
     <div class="modal-title">Profit Goal</div>
     <input type="hidden" id="editGoalAcctId"/>
-    <div class="modal-label">Profit Target ($)</div>
-    <input class="modal-input" id="editProfitGoal" type="number" placeholder="e.g. 3000"/>
-    <div class="modal-hint">When your total P&L reaches this amount the journal will celebrate. Based on total profit across all trades in this account.</div>
+    <div class="modal-label">Target Balance ($)</div>
+    <input class="modal-input" id="editProfitGoal" type="number" placeholder="e.g. 53000"/>
+    <div class="modal-hint">When your account balance reaches this amount the journal will celebrate. Requires a Starting Balance to be set on the account.</div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('editGoalModal')">Cancel</button>
       <button class="btn btn-danger" onclick="clearGoalSettings()">Remove</button>
@@ -1025,7 +1025,7 @@ function renderSidebar(){
     const soloOnly=!isAllSelected()&&state.selectedIds.size===1&&state.selectedIds.has(a.id);
     const dd=calcTrailingDD(a);
     const isBlown=dd&&dd.blown;
-    const goalAchieved=a.profit_goal&&grossPnl>=a.profit_goal;
+    const goalAchieved=a.profit_goal&&(currentBalance(a)!==null?currentBalance(a)>=a.profit_goal:grossPnl>=a.profit_goal);
     const currentBal2=currentBalance(a);
     const pctChange=a.starting_balance?((netPnl-totalWithdrawals(a))/a.starting_balance)*100:null;
     return`<div class="acct-row${soloOnly?' solo-active':''}" onclick="soloAccount('${a.id}')">
@@ -1331,37 +1331,40 @@ function renderDashboard(trades){
         <div style="background:#111520;border-radius:10px;padding:16px;">
           <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:12px;">🎯 Profit Goals</div>
           ${goalAcctsInView.length?goalAcctsInView.map(a=>{
-            const aPnl=a.trades.reduce((s,t)=>s+t.pnl,0);
+            const bal=currentBalance(a);
+            const hasBal=bal!==null;
+            const currentVal=hasBal?bal:a.trades.reduce((s,t)=>s+t.pnl,0);
             const goal=a.profit_goal;
-            const pct=Math.min(100,Math.max(0,(aPnl/goal)*100));
-            const achieved=aPnl>=goal;
-            const remaining=goal-aPnl;
+            const pct=Math.min(100,Math.max(0,(currentVal/goal)*100));
+            const achieved=currentVal>=goal;
+            const remaining=goal-currentVal;
             const fillColor=achieved?'#f59e0b':pct>75?'#22c55e':pct>40?'#3b82f6':'#6b7898';
-            const pnlColor=achieved?'#f59e0b':aPnl>=0?'#22c55e':'#ef4444';
+            const valColor=achieved?'#f59e0b':hasBal?(bal>=(a.starting_balance||0)?'#22c55e':'#ef4444'):'#c8d4e8';
             return`<div style="margin-bottom:16px;">
               <!-- Account name + badge + edit -->
               <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
                 <div style="width:7px;height:7px;border-radius:50%;background:${a.color};flex-shrink:0;"></div>
                 <span style="font-size:11px;color:#c8d4e8;">${a.name}</span>
                 ${achieved?'<span style="font-size:10px;background:#1a1200;color:#f59e0b;padding:1px 6px;border-radius:4px;border:1px solid #f59e0b40;margin-left:4px;">🏆 Done</span>':''}
-                <span onclick="showEditGoal('${a.id}')" style="margin-left:auto;font-size:10px;color:#374060;cursor:pointer;padding:2px 7px;border-radius:4px;border:1px solid #1e2540;background:#161b28;white-space:nowrap;" onmouseover="this.style.color='#c8d4e8';this.style.borderColor='#2a3558'" onmouseout="this.style.color='#374060';this.style.borderColor='#1e2540'">✎ Edit Goal</span>
+                <span onclick="showEditGoal('${a.id}')" style="margin-left:auto;font-size:11px;color:#e2e8f0;cursor:pointer;padding:4px 10px;border-radius:5px;border:1px solid #2a3558;background:#1a2035;white-space:nowrap;display:flex;align-items:center;gap:5px;font-weight:500;" onmouseover="this.style.background='#1e2a45';this.style.borderColor='#3b82f6'" onmouseout="this.style.background='#1a2035';this.style.borderColor='#2a3558'"><span style="color:#ef4444;font-size:12px;">✎</span> Edit Goal</span>
               </div>
-              <!-- Current P&L + Target (smaller) -->
-              <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px;">
-                <div style="font-size:16px;font-weight:600;font-family:'DM Mono',monospace;color:${pnlColor};">${aPnl>=0?'+':''}${fmtC(aPnl)}</div>
+              <!-- Current balance + target -->
+              <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px;">
+                <div style="font-size:16px;font-weight:600;font-family:'DM Mono',monospace;color:${valColor};">${fmtC(currentVal)}</div>
                 <div style="font-size:11px;color:#374060;">/ ${fmtC(goal)}</div>
                 <div style="font-size:10px;color:#4b5a7a;margin-left:auto;">${pct.toFixed(1)}%</div>
               </div>
+              ${!hasBal?`<div style="font-size:10px;color:#f59e0b;margin-bottom:6px;">⚠ Set a Starting Balance for balance-based tracking</div>`:''}
               <!-- Progress bar -->
               <div style="height:10px;background:#161b28;border-radius:5px;overflow:hidden;margin-bottom:10px;">
                 <div style="height:100%;width:${pct.toFixed(1)}%;background:${fillColor};border-radius:5px;transition:width .5s;${achieved?'box-shadow:0 0 8px #f59e0b60':''}"></div>
               </div>
-              <!-- BIG "to go" amount -->
+              <!-- BIG "balance needed" -->
               <div style="display:flex;align-items:baseline;justify-content:flex-end;">
                 ${achieved
                   ?`<div style="font-size:22px;font-weight:700;font-family:'DM Mono',monospace;color:#f59e0b;">Goal reached! 🎉</div>`
                   :`<div style="text-align:right;">
-                      <div style="font-size:11px;color:#4b5a7a;margin-bottom:2px;">Amount to go</div>
+                      <div style="font-size:11px;color:#4b5a7a;margin-bottom:2px;">Balance needed</div>
                       <div style="font-size:28px;font-weight:700;font-family:'DM Mono',monospace;color:#ef4444;letter-spacing:-.5px;">${fmtC(remaining)}</div>
                     </div>`
                 }
@@ -1448,11 +1451,12 @@ function renderGoalCards(accounts){
       <span style="font-size:10px;color:#4b5a7a;font-weight:400;">(total P&L vs target)</span>
     </div>
     ${goalAccts.map(a=>{
-      const totalPnl=a.trades.reduce((s,t)=>s+t.pnl,0);
+      const bal=currentBalance(a);
+      const currentVal=bal!==null?bal:a.trades.reduce((s,t)=>s+t.pnl,0);
       const goal=a.profit_goal;
-      const pct=Math.min(100,Math.max(0,(totalPnl/goal)*100));
-      const achieved=totalPnl>=goal;
-      const remaining=goal-totalPnl;
+      const pct=Math.min(100,Math.max(0,(currentVal/goal)*100));
+      const achieved=currentVal>=goal;
+      const remaining=goal-currentVal;
       const fillColor=achieved?'#f59e0b':pct>75?'#22c55e':pct>40?'#3b82f6':'#6b7898';
       return`<div class="goal-card${achieved?' achieved':''}" style="${achieved?'border-color:#f59e0b60;':''}">
         <div class="goal-label">
@@ -1461,14 +1465,14 @@ function renderGoalCards(accounts){
             ${a.name}
             ${achieved?'<span class="goal-badge">🏆 ACHIEVED</span>':''}
           </div>
-          <div style="font-family:'DM Mono',monospace;font-size:11px;color:${achieved?'#f59e0b':'#c8d4e8'};">${fmtM(totalPnl)} / ${fmtM(goal)}</div>
+          <div style="font-family:'DM Mono',monospace;font-size:11px;color:${achieved?'#f59e0b':'#c8d4e8'};">${fmtC(currentVal)} / ${fmtC(goal)}</div>
         </div>
         <div class="goal-track">
           <div class="goal-fill" style="width:${pct.toFixed(1)}%;background:${fillColor}${achieved?';box-shadow:0 0 8px #f59e0b60':''}"></div>
         </div>
         <div class="goal-meta">
           <span>${pct.toFixed(1)}% complete</span>
-          <span style="color:${achieved?'#f59e0b':'#4b5a7a'}">${achieved?'Goal reached! 🎉':'Need '+fmtM(remaining)+' more'}</span>
+          <span style="color:${achieved?'#f59e0b':'#4b5a7a'}">${achieved?'Goal reached! 🎉':'Need '+fmtC(remaining)+' more'}</span>
           <span style="cursor:pointer;color:#3b82f6;" onclick="showEditGoal('${a.id}')">Edit goal</span>
         </div>
       </div>`;
@@ -2164,12 +2168,13 @@ const celebratedGoals=new Set();
 function checkGoalAchievements(showPopup=true){
   state.accounts.forEach(a=>{
     if(!a.profit_goal)return;
-    const totalPnl=a.trades.reduce((s,t)=>s+t.pnl,0);
-    const achieved=totalPnl>=a.profit_goal;
+    const bal=currentBalance(a);
+    const currentVal=bal!==null?bal:a.trades.reduce((s,t)=>s+t.pnl,0);
+    const achieved=currentVal>=a.profit_goal;
     const key=`${a.id}_${a.profit_goal}`;
     if(achieved&&showPopup&&!celebratedGoals.has(key)){
       celebratedGoals.add(key);
-      setTimeout(()=>showGoalPopup(a.name,totalPnl),400);
+      setTimeout(()=>showGoalPopup(a.name,currentVal),400);
     }
   });
 }
