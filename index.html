@@ -1385,6 +1385,54 @@ function renderDashboard(trades){
         </div>
 
       </div>
+
+      <!-- TODAY'S P&L BANNER -->
+      ${(()=>{
+        const today=new Date().toDateString();
+        const todayTrades=getActiveTrades().filter(t=>t.date.toDateString()===today);
+        const todayPnl=todayTrades.reduce((s,t)=>s+t.pnl,0);
+        const todayNet=todayTrades.reduce((s,t)=>s+t.netPnl,0);
+        const todayWins=todayTrades.filter(t=>t.pnl>0).length;
+        const todayLosses=todayTrades.filter(t=>t.pnl<0).length;
+        const todayWR=todayTrades.length?(todayWins/todayTrades.length*100).toFixed(0):0;
+        const isPos=todayPnl>=0;
+        const hasToday=todayTrades.length>0;
+        const bgColor=hasToday?(isPos?'linear-gradient(135deg,#091a10,#0a1a0e)':'linear-gradient(135deg,#1a0808,#180a0a)'):'#0a0c11';
+        const borderColor=hasToday?(isPos?'#22c55e30':'#ef444430'):'#1a1f2e';
+        const pnlColor=isPos?'#22c55e':'#ef4444';
+        return`<div style="margin-top:14px;background:${bgColor};border:1px solid ${borderColor};border-radius:10px;padding:14px 20px;display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
+          <div>
+            <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;">Today's P&amp;L</div>
+            <div style="font-size:32px;font-weight:700;font-family:'DM Mono',monospace;color:${hasToday?pnlColor:'#374060'};letter-spacing:-.5px;line-height:1;">${hasToday?(isPos?'+':'')+fmtC(todayPnl):'–'}</div>
+          </div>
+          ${hasToday?`
+          <div style="width:1px;height:48px;background:#1e2535;flex-shrink:0;"></div>
+          <div style="display:flex;gap:20px;flex-wrap:wrap;">
+            <div>
+              <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;">Net P&amp;L</div>
+              <div style="font-size:18px;font-weight:600;font-family:'DM Mono',monospace;color:${todayNet>=0?'#22c55e':'#ef4444'};">${todayNet>=0?'+':''}${fmtC(todayNet)}</div>
+            </div>
+            <div>
+              <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;">Trades</div>
+              <div style="font-size:18px;font-weight:600;font-family:'DM Mono',monospace;color:#e2e8f0;">${todayTrades.length}</div>
+            </div>
+            <div>
+              <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;">Win Rate</div>
+              <div style="font-size:18px;font-weight:600;font-family:'DM Mono',monospace;color:${todayWR>=50?'#22c55e':'#ef4444'}">${todayWR}%</div>
+            </div>
+            <div>
+              <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;">W / L</div>
+              <div style="font-size:18px;font-weight:600;font-family:'DM Mono',monospace;"><span style="color:#22c55e;">${todayWins}W</span> <span style="color:#374060;">/</span> <span style="color:#ef4444;">${todayLosses}L</span></div>
+            </div>
+          </div>
+          <div style="margin-left:auto;">
+            <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;text-align:right;">Date</div>
+            <div style="font-size:13px;color:#6b7898;">${new Date().toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</div>
+          </div>`
+          :`<div style="font-size:12px;color:#374060;font-style:italic;">No trades recorded today</div>`}
+        </div>`;
+      })()}
+
     </div>
     <!-- ── END HEADER ───────────────────────────────────────── -->
 
@@ -1403,45 +1451,42 @@ function renderDashboard(trades){
         </div>
       </div>
       <div id="dashCalGrid"></div>
+      <!-- STREAK TRACKER -->
+      <div id="dashStreakBar" style="margin-top:14px;padding-top:12px;border-top:1px solid #1a1f2e;"></div>
+    </div>
+
+    <!-- EQUITY CURVE (bigger, under calendar) -->
+    <div class="chart-card" style="margin-bottom:16px;">
+      <div class="chart-head"><span class="chart-title">Cumulative P&amp;L</span><span class="chip">Equity Curve</span></div>
+      <div style="position:relative;height:280px;"><canvas id="eqChart" role="img" aria-label="Equity curve">Equity</canvas></div>
     </div>
 
     <div class="stat-grid">
       <div class="stat-card"><div class="stat-label">Net P&amp;L</div><div class="stat-val ${netPnl>=0?'g':'r'}">${fmtM(netPnl)}</div><div class="stat-sub">Gross: ${fmtM(totalPnl)}</div></div>
       <div class="stat-card"><div class="stat-label">Win Rate</div><div class="stat-val ${wr>=50?'g':'r'}">${wr.toFixed(1)}%</div><div class="stat-sub">${wins.length}W / ${losses.length}L</div></div>
       <div class="stat-card"><div class="stat-label">Profit Factor</div><div class="stat-val ${pf>=1.5?'g':pf>=1?'b':'r'}">${pf.toFixed(2)}x</div><div class="stat-sub">${pf>=1.5?'Excellent':pf>=1?'Good':'Below 1'}</div></div>
-      <div class="stat-card"><div class="stat-label">Expectancy</div><div class="stat-val ${exp>=0?'g':'r'}">${fmt(exp)}</div><div class="stat-sub">Per trade avg</div></div>
-      <div class="stat-card"><div class="stat-label">Total Trades</div><div class="stat-val w">${trades.length}</div><div class="stat-sub">${wins.length}W · ${losses.length}L</div></div>
       <div class="stat-card"><div class="stat-label">Avg Win</div><div class="stat-val g">${fmt(avgWin)}</div><div class="stat-sub">Per winning trade</div></div>
       <div class="stat-card"><div class="stat-label">Avg Loss</div><div class="stat-val r">${fmt(avgLoss)}</div><div class="stat-sub">Per losing trade</div></div>
       <div class="stat-card"><div class="stat-label">Avg R:R</div><div class="stat-val b">${rr}</div><div class="stat-sub">Risk/Reward ratio</div></div>
       <div class="stat-card"><div class="stat-label">Best Trade</div><div class="stat-val g">${fmt(maxWin)}</div><div class="stat-sub">Single trade max</div></div>
       <div class="stat-card"><div class="stat-label">Worst Trade</div><div class="stat-val r">${fmt(maxLoss)}</div><div class="stat-sub">Single trade max</div></div>
-      <div class="stat-card"><div class="stat-label">Max Drawdown %</div><div class="stat-val ${maxDD>0?'r':'g'}">${maxDDPct.toFixed(1)}%</div><div class="stat-sub">${fmtM(-maxDD)} from peak</div></div>
-      <div class="stat-card"><div class="stat-label">Total Fees</div><div class="stat-val w">$${fees.toFixed(2)}</div><div class="stat-sub">Commissions paid</div></div>
     </div>
     <div class="g3">
-      <div class="chart-card"><div class="chart-head"><span class="chart-title">Cumulative P&amp;L</span><span class="chip">Equity Curve</span></div><div style="position:relative;height:200px;"><canvas id="eqChart" role="img" aria-label="Equity curve">Equity</canvas></div></div>
       <div class="chart-card"><div class="chart-head"><span class="chart-title">Performance</span></div><div>
         <div class="prog-row"><div class="prog-label">Win Rate</div><div class="prog-track"><div class="prog-fill ${wr>=50?'g':'r'}" style="width:${wr.toFixed(0)}%"></div></div><div class="prog-val">${wr.toFixed(1)}%</div></div>
         <div class="prog-row"><div class="prog-label">Prof. Factor</div><div class="prog-track"><div class="prog-fill ${pf>=1?'g':'r'}" style="width:${Math.min(pf/3*100,100).toFixed(0)}%"></div></div><div class="prog-val">${pf.toFixed(2)}x</div></div>
         <div class="prog-row"><div class="prog-label">Avg R:R</div><div class="prog-track"><div class="prog-fill b" style="width:${Math.min((parseFloat(rr)||0)/5*100,100)}%"></div></div><div class="prog-val">${rr}</div></div>
         <div class="prog-row"><div class="prog-label">Cur. DD</div><div class="prog-track"><div class="prog-fill r" style="width:${Math.min(curDDPct,100).toFixed(0)}%"></div></div><div class="prog-val" style="color:#ef4444;">${curDDPct.toFixed(1)}%</div></div>
       </div>${renderSelBreakdown()}</div>
+      <div class="chart-card"><div class="chart-head"><span class="chart-title">Daily P&amp;L</span></div><div style="position:relative;height:200px;"><canvas id="dayChart" role="img" aria-label="Daily PnL">Daily</canvas></div></div>
     </div>
     <div class="g2">
-      <div class="chart-card"><div class="chart-head"><span class="chart-title">Daily P&amp;L</span></div><div style="position:relative;height:170px;"><canvas id="dayChart" role="img" aria-label="Daily PnL">Daily</canvas></div></div>
       <div class="chart-card"><div class="chart-head"><span class="chart-title">Win / Loss Split</span></div><div style="position:relative;height:170px;"><canvas id="wlChart" role="img" aria-label="Win loss">${wins.length}W ${losses.length}L</canvas></div></div>
+      <div class="chart-card"><div class="chart-head"><span class="chart-title">P&amp;L by Hour</span></div><div style="position:relative;height:170px;"><canvas id="hrChart" role="img" aria-label="Hourly PnL">Hourly</canvas></div></div>
     </div>
     <div class="g2">
       <div class="chart-card"><div class="chart-head"><span class="chart-title">Top Symbols</span></div><div id="symBreak"></div></div>
-      <div class="chart-card"><div class="chart-head"><span class="chart-title">P&amp;L by Hour</span></div><div style="position:relative;height:170px;"><canvas id="hrChart" role="img" aria-label="Hourly PnL">Hourly</canvas></div></div>
-    </div>
-    <div class="chart-card" style="margin-bottom:14px;">
-      <div class="chart-head">
-        <span class="chart-title">Today's Intraday P&amp;L</span>
-        <div style="display:flex;align-items:center;gap:8px;" id="todayChartMeta"></div>
-      </div>
-      <div style="position:relative;height:180px;"><canvas id="todayChart" role="img" aria-label="Today intraday PnL">Today's trades</canvas></div>
+      <div class="chart-card"><div class="chart-head"><span class="chart-title">Today's Intraday P&amp;L</span><div style="display:flex;align-items:center;gap:8px;" id="todayChartMeta"></div></div><div style="position:relative;height:170px;"><canvas id="todayChart" role="img" aria-label="Today intraday PnL">Today's trades</canvas></div></div>
     </div>
     ${renderGoalCards(activeAccts)}`;
   setTimeout(()=>{drawEquity(trades);drawDaily(trades);drawWL(wins.length,losses.length);drawSymbols(trades);drawHourly(trades);drawTodayIntraday(trades);renderDashCal(trades);checkGoalAchievements(true);},50);
@@ -1521,6 +1566,62 @@ function toggleAcctFromDropdown(id){
   }
   renderAll();
 }
+
+// ── STREAK CALCULATOR ─────────────────────────────────────────────────────────
+function calcStreaks(trades){
+  const byDay={};
+  trades.forEach(t=>{const k=t.date.toISOString().slice(0,10);byDay[k]=(byDay[k]||0)+t.pnl;});
+  const days=Object.keys(byDay).sort();
+  if(!days.length)return{curStreak:0,curType:null,maxWin:0,maxLoss:0,lastDays:[]};
+  let curStreak=0,curType=null,maxWin=0,maxLoss=0,tmpStreak=0,tmpType=null;
+  for(const d of days){
+    const type=byDay[d]>0?'win':'loss';
+    if(type===tmpType)tmpStreak++;else{tmpStreak=1;tmpType=type;}
+    if(type==='win'&&tmpStreak>maxWin)maxWin=tmpStreak;
+    if(type==='loss'&&tmpStreak>maxLoss)maxLoss=tmpStreak;
+  }
+  const lastDay=days[days.length-1];
+  curType=byDay[lastDay]>0?'win':'loss';curStreak=0;
+  for(let i=days.length-1;i>=0;i--){
+    const type=byDay[days[i]]>0?'win':'loss';
+    if(type===curType)curStreak++;else break;
+  }
+  const lastDays=days.slice(-14).map(d=>({date:d,pnl:byDay[d],type:byDay[d]>0?'win':'loss'}));
+  return{curStreak,curType,maxWin,maxLoss,lastDays};
+}
+
+function renderStreakBar(trades,containerId){
+  const el=document.getElementById(containerId);if(!el)return;
+  if(!trades.length){el.innerHTML='';return;}
+  const{curStreak,curType,maxWin,maxLoss,lastDays}=calcStreaks(trades);
+  const sc=curType==='win'?'#22c55e':'#ef4444';
+  const sl=curType==='win'?'Win':'Loss';
+  el.innerHTML=`<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+    <div>
+      <div style="font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:2px;">Current Streak</div>
+      <div style="display:flex;align-items:baseline;gap:5px;">
+        <span style="font-size:26px;font-weight:700;font-family:'DM Mono',monospace;color:${sc};">${curStreak}</span>
+        <span style="font-size:12px;color:${sc};font-weight:600;">${sl}${curStreak!==1?'s':''}</span>
+      </div>
+    </div>
+    <div style="width:1px;height:36px;background:#1e2535;flex-shrink:0;"></div>
+    <div>
+      <div style="font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:2px;">Best Win Streak</div>
+      <div style="font-size:16px;font-weight:600;font-family:'DM Mono',monospace;color:#22c55e;">${maxWin} day${maxWin!==1?'s':''}</div>
+    </div>
+    <div>
+      <div style="font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:2px;">Worst Loss Streak</div>
+      <div style="font-size:16px;font-weight:600;font-family:'DM Mono',monospace;color:#ef4444;">${maxLoss} day${maxLoss!==1?'s':''}</div>
+    </div>
+    <div style="margin-left:auto;">
+      <div style="font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:5px;">Last ${lastDays.length} Days</div>
+      <div style="display:flex;gap:3px;align-items:center;">
+        ${lastDays.map(d=>`<div title="${d.date}: ${d.pnl>=0?'+':''}${Math.round(d.pnl)}" style="width:20px;height:20px;border-radius:4px;background:${d.type==='win'?'#091a10':'#1a0909'};border:1px solid ${d.type==='win'?'#22c55e40':'#ef444440'};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;color:${d.type==='win'?'#22c55e':'#ef4444'};">${d.type==='win'?'W':'L'}</div>`).join('')}
+      </div>
+    </div>
+  </div>`;
+}
+
 let dashCalYear = new Date().getFullYear();
 let dashCalMonth = new Date().getMonth();
 let dashCalTrades = [];
@@ -1653,9 +1754,9 @@ function renderDashCal(trades){
   </div>`;
 
   grid.innerHTML=html;
+  // Render streak bar
+  renderStreakBar(trades,'dashStreakBar');
 }
-
-function dashCalClickDay(dateKey){
   // Switch to calendar tab and select that day
   calYear=new Date(dateKey).getFullYear();
   calMonth=new Date(dateKey).getMonth();
@@ -1918,108 +2019,53 @@ function renderCalendar(preserveScroll=false){
     </div>`;
   }
 
-  // Build calendar grid
-  let cal=dh.map(d=>`<div class="cal-dh">${d}</div>`).join('');
+  // Build calendar grid with weekly totals (8 cols: Sun-Sat + Week)
+  let cal=dh.map(d=>`<div class="cal-dh">${d}</div>`).join('')+'<div style="font-size:9px;color:#2563eb;text-align:center;padding:4px;text-transform:uppercase;font-weight:500;">Week</div>';
+  let colPos=firstDay,weekPnl=0,weekHas=false;
   for(let i=0;i<firstDay;i++) cal+=`<div class="cal-d empty"></div>`;
-
   for(let d=1;d<=daysInMonth;d++){
-    const dateObj = new Date(calYear,calMonth,d);
-    const k = dateObj.toDateString();
-    const pnl = byDay[k];
-    const tcount = (tradesByDay[k]||[]).length;
-    const isToday = d===now.getDate() && calMonth===now.getMonth() && calYear===now.getFullYear();
-    const isSelected = calSelectedDay === k;
-
-    if(pnl !== undefined){
+    const dateObj=new Date(calYear,calMonth,d);
+    const k=dateObj.toDateString();
+    const pnl=byDay[k];
+    const tcount=(tradesByDay[k]||[]).length;
+    const isToday=d===now.getDate()&&calMonth===now.getMonth()&&calYear===now.getFullYear();
+    const isSelected=calSelectedDay===k;
+    if(pnl!==undefined){
+      weekPnl+=pnl;weekHas=true;
       const cls=`cal-d ${pnl>=0?'win':'loss'}${isToday?' today':''}${isSelected?' selected':''}`;
-      const pnlLabel = Math.abs(pnl)<1000 ? (pnl>=0?'+':'')+pnl.toFixed(0) : (pnl>=0?'+':'-')+(Math.abs(pnl)/1000).toFixed(1)+'k';
-      cal+=`<div class="${cls}" onclick="calClickDay('${k}')">
-        <div class="cal-dn">${d}</div>
-        <div class="cal-pnl">${pnlLabel}</div>
-        <div class="cal-trades">${tcount} trade${tcount!==1?'s':''}</div>
-      </div>`;
+      const pnlLabel=Math.abs(pnl)<1000?(pnl>=0?'+':'')+pnl.toFixed(0):(pnl>=0?'+':'-')+(Math.abs(pnl)/1000).toFixed(1)+'k';
+      cal+=`<div class="${cls}" onclick="calClickDay('${k}')"><div class="cal-dn">${d}</div><div class="cal-pnl">${pnlLabel}</div><div class="cal-trades">${tcount} trade${tcount!==1?'s':''}</div></div>`;
     } else {
       const cls=`cal-d nt${isToday?' today':''}${isSelected?' selected':''}`;
-      cal+=`<div class="${cls}" onclick="calClickDay('${k}')">
-        <div class="cal-dn">${d}</div>
-      </div>`;
+      cal+=`<div class="${cls}" onclick="calClickDay('${k}')"><div class="cal-dn">${d}</div></div>`;
+    }
+    colPos++;
+    if(colPos%7===0||d===daysInMonth){
+      if(d===daysInMonth&&colPos%7!==0){const rem=7-(colPos%7);for(let p=0;p<rem;p++)cal+=`<div class="cal-d empty"></div>`;}
+      if(weekHas){const wc=weekPnl>=0?'#22c55e':'#ef4444';const wbg=weekPnl>=0?'rgba(34,197,94,0.07)':'rgba(239,68,68,0.07)';const wLabel=Math.abs(weekPnl)<1000?(weekPnl>=0?'+':'')+weekPnl.toFixed(0):(weekPnl>=0?'+':'-')+(Math.abs(weekPnl)/1000).toFixed(1)+'k';cal+=`<div style="aspect-ratio:1;border-radius:7px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:${wbg};border:1px solid ${wc}30;"><div style="font-size:8px;color:${wc};opacity:.6;margin-bottom:2px;text-transform:uppercase;">Week</div><div style="font-size:11px;font-family:'DM Mono',monospace;font-weight:700;color:${wc};">${wLabel}</div></div>`;}
+      else cal+=`<div style="aspect-ratio:1;border-radius:7px;border:1px solid #1e2535;background:#0a0c11;"></div>`;
+      weekPnl=0;weekHas=false;
     }
   }
-
-  // Build day detail panel
-  let detailHTML = '';
-  if(calSelectedDay){
-    const dayTrades = (tradesByDay[calSelectedDay]||[]).sort((a,b)=>a.date-b.date);
-    const dayPnl = byDay[calSelectedDay]||0;
-    const dayWins = dayTrades.filter(t=>t.pnl>0);
-    const dayLosses = dayTrades.filter(t=>t.pnl<0);
-    const dayWR = dayTrades.length?(dayWins.length/dayTrades.length*100).toFixed(0):0;
-    const dayAvgWin = dayWins.length?dayWins.reduce((s,t)=>s+t.pnl,0)/dayWins.length:0;
-    const dayAvgLoss = dayLosses.length?dayLosses.reduce((s,t)=>s+t.pnl,0)/dayLosses.length:0;
-    const dayBest = dayWins.length?Math.max(...dayWins.map(t=>t.pnl)):0;
-    const dayWorst = dayLosses.length?Math.min(...dayLosses.map(t=>t.pnl)):0;
-    const dayFees = dayTrades.reduce((s,t)=>s+t.fees,0);
-    const dayNetPnl = dayTrades.reduce((s,t)=>s+t.netPnl,0);
-    const dateLabel = new Date(calSelectedDay).toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
-    const showAcctCol = calAccountFilter==='all' && activeAccounts.length>1;
-
-    detailHTML=`<div class="day-detail" id="dayDetail">
-      <div class="day-detail-header">
-        <div class="day-detail-title">${dateLabel}</div>
-        <div class="day-detail-close" onclick="calSelectedDay=null;renderCalendar()">✕</div>
-      </div>
-      <div class="day-stat-row">
-        <div class="day-stat"><div class="day-stat-label">Gross P&amp;L</div><div class="day-stat-val" style="color:${dayPnl>=0?'#22c55e':'#ef4444'}">${fmt(dayPnl)}</div></div>
-        <div class="day-stat"><div class="day-stat-label">Net P&amp;L</div><div class="day-stat-val" style="color:${dayNetPnl>=0?'#22c55e':'#ef4444'}">${fmt(dayNetPnl)}</div></div>
-        <div class="day-stat"><div class="day-stat-label">Trades</div><div class="day-stat-val" style="color:#e2e8f0;">${dayTrades.length}</div></div>
-        <div class="day-stat"><div class="day-stat-label">Win Rate</div><div class="day-stat-val" style="color:${dayWR>=50?'#22c55e':'#ef4444'}">${dayWR}%</div></div>
-        <div class="day-stat"><div class="day-stat-label">Avg Win</div><div class="day-stat-val" style="color:#22c55e;">${dayWins.length?fmt(dayAvgWin):'–'}</div></div>
-        <div class="day-stat"><div class="day-stat-label">Avg Loss</div><div class="day-stat-val" style="color:#ef4444;">${dayLosses.length?fmt(dayAvgLoss):'–'}</div></div>
-        <div class="day-stat"><div class="day-stat-label">Best Trade</div><div class="day-stat-val" style="color:#22c55e;">${dayWins.length?fmt(dayBest):'–'}</div></div>
-        <div class="day-stat"><div class="day-stat-label">Worst Trade</div><div class="day-stat-val" style="color:#ef4444;">${dayLosses.length?fmt(dayWorst):'–'}</div></div>
-        <div class="day-stat"><div class="day-stat-label">Fees Paid</div><div class="day-stat-val" style="color:#6b7898;">$${dayFees.toFixed(2)}</div></div>
-      </div>
-      ${dayTrades.length?`
-        <!-- INTRADAY EQUITY CURVE -->
-        <div style="margin-bottom:16px;">
-          <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:10px;">Intraday P&amp;L Curve</div>
-          <div style="position:relative;height:160px;"><canvas id="intradayChart" role="img" aria-label="Intraday equity curve">Intraday PnL</canvas></div>
-        </div>
-        <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;">Trade Breakdown</div>
-        ${dayTrades.map(t=>`
-          <div class="day-trade-row">
-            <div class="day-trade-sym">${t.symbol}</div>
-            <div class="day-trade-side"><span class="pill ${t.side==='Long'?'pill-l':'pill-s'}">${t.side.toUpperCase()}</span></div>
-            ${showAcctCol?`<div><span class="acct-chip" style="background:${t.accountColor}20;color:${t.accountColor}">${t.accountName}</span></div>`:''}
-            <div style="flex:1;font-family:'DM Mono',monospace;font-size:10px;color:#6b7898;">
-              ${t.entry?'@'+t.entry.toFixed(2):''}${t.exit&&t.exit>0?' → '+t.exit.toFixed(2):''} · ${t.qty} ct
-            </div>
-            <div style="font-size:10px;color:#4b5a7a;font-family:'DM Mono',monospace;min-width:60px;text-align:right;">
-              ${t.date.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})}
-            </div>
-            <div class="day-trade-pnl" style="color:${t.pnl>=0?'#22c55e':'#ef4444'}">${fmt(t.pnl)}</div>
-          </div>`).join('')}
-      `:`<div style="color:#4b5a7a;font-size:12px;text-align:center;padding:16px;">No trades on this day</div>`}
-    </div>`;
-    // Draw intraday chart after HTML is set
-    if(dayTrades.length){
-      setTimeout(()=>drawIntradayChart('intradayChart', dayTrades, activeAccounts),80);
-    }
-  }
-
   document.getElementById('calendarView').innerHTML=`
     <div class="filter-bar">
       <div class="page-title">Calendar</div>
       <div class="spacer"></div>
       <div class="cal-month-nav">
-        <button class="cal-nav-btn" onclick="calNav(-1)">‹</button>
+        <button class="cal-nav-btn" onclick="calNav(-1)">&#8249;</button>
         <div style="font-size:13px;font-weight:500;color:#c8d4e8;min-width:140px;text-align:center;">${monthName}</div>
-        <button class="cal-nav-btn" onclick="calNav(1)">›</button>
+        <button class="cal-nav-btn" onclick="calNav(1)">&#8250;</button>
         <button class="btn btn-ghost" style="font-size:11px;padding:4px 10px;margin-left:4px;" onclick="calYear=new Date().getFullYear();calMonth=new Date().getMonth();calSelectedDay=null;renderCalendar()">Today</button>
       </div>
     </div>
     ${acctBar}
-    <div class="chart-card"><div class="cal-grid">${cal}</div></div>
+    <div class="chart-card">
+      <div style="display:grid;grid-template-columns:repeat(7,1fr) 60px;gap:4px;">${cal}</div>
+      <div id="calStreakBar" style="margin-top:14px;padding-top:12px;border-top:1px solid #1a1f2e;"></div>
+    </div>
+    ${detailHTML}`;
+  renderStreakBar(trades,'calStreakBar');
+
     ${detailHTML}`;
 }
 
