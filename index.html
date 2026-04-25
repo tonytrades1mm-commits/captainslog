@@ -1757,6 +1757,8 @@ function renderDashCal(trades){
   // Render streak bar
   renderStreakBar(trades,'dashStreakBar');
 }
+
+function dashCalClickDay(dateKey){
   // Switch to calendar tab and select that day
   calYear=new Date(dateKey).getFullYear();
   calMonth=new Date(dateKey).getMonth();
