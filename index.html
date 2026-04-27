@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TradeLog Pro</title>
+<title>Moonshot Dreams</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -357,7 +357,7 @@ input[type=file]{display:none;}
   <button class="hamburger" id="hamburger" onclick="toggleSidebar()">
     <span></span><span></span><span></span>
   </button>
-  <div class="logo"><div class="logo-mark">📈</div>TradeLog Pro</div>
+  <div class="logo"><div class="logo-mark">🚀</div>Moonshot Dreams</div>
   <button class="nav-tab active" onclick="setTab('dashboard',this)">Dashboard</button>
   <button class="nav-tab" onclick="setTab('trades',this)">Trades</button>
   <button class="nav-tab" onclick="setTab('analytics',this)">Analytics</button>
@@ -2041,10 +2041,158 @@ function renderAnalytics(trades){
   },50);
 }
 
+// Trade history state
+let tradesPage = 1;
+const TRADES_PER_PAGE = 50;
+let tradesAll = [];
+let tradesFilters = {fromDate:'', toDate:'', symbol:''};
+
 function renderTradesView(trades){
+  tradesAll = trades;
+  tradesPage = 1;
+  // Default filter: clear
+  tradesFilters = {fromDate:'', toDate:'', symbol:''};
+  drawTradesTable();
+}
+
+function tradesApplyFilters(){
+  tradesFilters.fromDate = document.getElementById('tFrom')?.value || '';
+  tradesFilters.toDate = document.getElementById('tTo')?.value || '';
+  tradesFilters.symbol = (document.getElementById('tSym')?.value || '').toUpperCase().trim();
+  tradesPage = 1;
+  drawTradesTable();
+}
+
+function tradesClearFilters(){
+  tradesFilters = {fromDate:'', toDate:'', symbol:''};
+  tradesPage = 1;
+  drawTradesTable();
+}
+
+function tradesSetQuickRange(days){
+  const to = new Date();
+  const from = new Date();
+  from.setDate(from.getDate()-days);
+  tradesFilters.fromDate = from.toISOString().slice(0,10);
+  tradesFilters.toDate = to.toISOString().slice(0,10);
+  tradesPage = 1;
+  drawTradesTable();
+}
+
+function tradesGoToPage(p){
+  tradesPage = p;
+  drawTradesTable();
+  document.querySelector('#tradesView').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function getFilteredTrades(){
+  let filtered = [...tradesAll];
+  if(tradesFilters.fromDate){
+    const from = new Date(tradesFilters.fromDate);
+    from.setHours(0,0,0,0);
+    filtered = filtered.filter(t=>t.date>=from);
+  }
+  if(tradesFilters.toDate){
+    const to = new Date(tradesFilters.toDate);
+    to.setHours(23,59,59,999);
+    filtered = filtered.filter(t=>t.date<=to);
+  }
+  if(tradesFilters.symbol){
+    filtered = filtered.filter(t=>t.symbol.toUpperCase().includes(tradesFilters.symbol));
+  }
+  return filtered;
+}
+
+function drawTradesTable(){
   const showAcct=getActiveAccounts().length>1;
-  const rows=[...trades].reverse().slice(0,500).map(t=>`<tr><td>${t.date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'})}</td><td class="sym">${t.symbol}</td>${showAcct?`<td><span class="acct-chip" style="background:${t.accountColor}20;color:${t.accountColor}">${t.accountName}</span></td>`:''}<td><span class="pill ${t.side==='Long'?'pill-l':'pill-s'}">${t.side.toUpperCase()}</span></td><td>${t.qty||1}</td><td>${t.entry?'$'+t.entry.toFixed(2):'–'}</td><td>${t.exit?'$'+t.exit.toFixed(2):'–'}</td><td class="${t.pnl>=0?'tg':'tr2'}">${fmt(t.pnl)}</td><td class="${t.netPnl>=0?'tg':'tr2'}">${fmt(t.netPnl)}</td><td style="color:#374060;">$${t.fees.toFixed(2)}</td></tr>`).join('');
-  document.getElementById('tradesView').innerHTML=`<div class="filter-bar"><div class="page-title">Trade History</div>${renderSelPills()}<div class="spacer"></div><button class="btn btn-ghost" onclick="showImportModal()">↑ Import CSV</button></div><div class="table-card"><div class="table-head"><div class="table-title">All Trades</div><div style="font-size:10px;color:#374060;">${trades.length} total</div></div><div style="overflow-x:auto;"><table><thead><tr><th>Date</th><th>Symbol</th>${showAcct?'<th>Account</th>':''}<th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>Net P&amp;L</th><th>Fees</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  const filtered = getFilteredTrades();
+  // Sort by date desc (newest first)
+  const sorted = [...filtered].sort((a,b)=>b.date-a.date);
+  const totalPages = Math.max(1, Math.ceil(sorted.length / TRADES_PER_PAGE));
+  if(tradesPage > totalPages) tradesPage = totalPages;
+
+  const startIdx = (tradesPage-1) * TRADES_PER_PAGE;
+  const endIdx = startIdx + TRADES_PER_PAGE;
+  const pageTrades = sorted.slice(startIdx, endIdx);
+
+  // Build pagination controls
+  const buildPager = ()=>{
+    if(totalPages<=1) return '';
+    let pages = [];
+    // Always show first, last, current and neighbors
+    const window = 1; // pages on each side of current
+    for(let i=1;i<=totalPages;i++){
+      if(i===1||i===totalPages||(i>=tradesPage-window&&i<=tradesPage+window)){
+        pages.push(i);
+      } else if(pages[pages.length-1]!=='...'){
+        pages.push('...');
+      }
+    }
+    return `<div style="display:flex;align-items:center;gap:6px;justify-content:center;padding:14px 0 4px;flex-wrap:wrap;">
+      <button onclick="tradesGoToPage(${Math.max(1,tradesPage-1)})" ${tradesPage===1?'disabled':''} style="padding:5px 10px;border-radius:6px;border:1px solid #1a1f2e;background:transparent;color:${tradesPage===1?'#374060':'#c8d4e8'};font-size:11px;cursor:${tradesPage===1?'not-allowed':'pointer'};">‹ Prev</button>
+      ${pages.map(p=>p==='...'?`<span style="color:#374060;padding:0 4px;">...</span>`:`<button onclick="tradesGoToPage(${p})" style="padding:5px 10px;border-radius:6px;border:1px solid ${p===tradesPage?'#3b82f6':'#1a1f2e'};background:${p===tradesPage?'#1a2035':'transparent'};color:${p===tradesPage?'#fff':'#c8d4e8'};font-size:11px;font-weight:${p===tradesPage?'600':'400'};cursor:pointer;min-width:32px;">${p}</button>`).join('')}
+      <button onclick="tradesGoToPage(${Math.min(totalPages,tradesPage+1)})" ${tradesPage===totalPages?'disabled':''} style="padding:5px 10px;border-radius:6px;border:1px solid #1a1f2e;background:transparent;color:${tradesPage===totalPages?'#374060':'#c8d4e8'};font-size:11px;cursor:${tradesPage===totalPages?'not-allowed':'pointer'};">Next ›</button>
+    </div>`;
+  };
+
+  const rows = pageTrades.map(t=>`<tr><td>${t.date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'})}</td><td class="sym">${t.symbol}</td>${showAcct?`<td><span class="acct-chip" style="background:${t.accountColor}20;color:${t.accountColor}">${t.accountName}</span></td>`:''}<td><span class="pill ${t.side==='Long'?'pill-l':'pill-s'}">${t.side.toUpperCase()}</span></td><td>${t.qty||1}</td><td>${t.entry?'$'+t.entry.toFixed(2):'–'}</td><td>${t.exit?'$'+t.exit.toFixed(2):'–'}</td><td class="${t.pnl>=0?'tg':'tr2'}">${fmt(t.pnl)}</td><td class="${t.netPnl>=0?'tg':'tr2'}">${fmt(t.netPnl)}</td><td style="color:#374060;">$${t.fees.toFixed(2)}</td></tr>`).join('');
+
+  const hasFilters = tradesFilters.fromDate||tradesFilters.toDate||tradesFilters.symbol;
+
+  document.getElementById('tradesView').innerHTML=`
+    <div class="filter-bar">
+      <div class="page-title">Trade History</div>
+      ${renderSelPills()}
+      <div class="spacer"></div>
+      <button class="btn btn-ghost" onclick="showImportModal()">↑ Import CSV</button>
+    </div>
+
+    <!-- FILTERS -->
+    <div style="background:#0c0e14;border:1px solid #1a1f2e;border-radius:10px;padding:14px 16px;margin-bottom:14px;">
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+        <div>
+          <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">From</div>
+          <input id="tFrom" type="date" value="${tradesFilters.fromDate}" onchange="tradesApplyFilters()" style="background:#161b28;border:1px solid #1e2540;border-radius:6px;padding:6px 8px;color:#c8d4e8;font-family:'DM Sans',sans-serif;font-size:12px;color-scheme:dark;"/>
+        </div>
+        <div>
+          <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">To</div>
+          <input id="tTo" type="date" value="${tradesFilters.toDate}" onchange="tradesApplyFilters()" style="background:#161b28;border:1px solid #1e2540;border-radius:6px;padding:6px 8px;color:#c8d4e8;font-family:'DM Sans',sans-serif;font-size:12px;color-scheme:dark;"/>
+        </div>
+        <div>
+          <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">Symbol</div>
+          <input id="tSym" type="text" value="${tradesFilters.symbol}" oninput="tradesApplyFilters()" placeholder="e.g. MNQ" style="background:#161b28;border:1px solid #1e2540;border-radius:6px;padding:6px 10px;color:#c8d4e8;font-family:'DM Sans',sans-serif;font-size:12px;width:120px;"/>
+        </div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap;">
+          <button onclick="tradesSetQuickRange(7)" style="padding:6px 10px;border-radius:6px;border:1px solid #1e2540;background:transparent;color:#6b7898;font-size:11px;cursor:pointer;font-family:'DM Sans',sans-serif;" onmouseover="this.style.color='#c8d4e8'" onmouseout="this.style.color='#6b7898'">7D</button>
+          <button onclick="tradesSetQuickRange(30)" style="padding:6px 10px;border-radius:6px;border:1px solid #1e2540;background:transparent;color:#6b7898;font-size:11px;cursor:pointer;font-family:'DM Sans',sans-serif;" onmouseover="this.style.color='#c8d4e8'" onmouseout="this.style.color='#6b7898'">30D</button>
+          <button onclick="tradesSetQuickRange(90)" style="padding:6px 10px;border-radius:6px;border:1px solid #1e2540;background:transparent;color:#6b7898;font-size:11px;cursor:pointer;font-family:'DM Sans',sans-serif;" onmouseover="this.style.color='#c8d4e8'" onmouseout="this.style.color='#6b7898'">90D</button>
+          <button onclick="tradesSetQuickRange(365)" style="padding:6px 10px;border-radius:6px;border:1px solid #1e2540;background:transparent;color:#6b7898;font-size:11px;cursor:pointer;font-family:'DM Sans',sans-serif;" onmouseover="this.style.color='#c8d4e8'" onmouseout="this.style.color='#6b7898'">1Y</button>
+        </div>
+        ${hasFilters?`<button onclick="tradesClearFilters()" style="padding:6px 12px;border-radius:6px;border:1px solid #ef444440;background:transparent;color:#ef4444;font-size:11px;cursor:pointer;font-family:'DM Sans',sans-serif;">✕ Clear Filters</button>`:''}
+      </div>
+    </div>
+
+    <!-- TABLE -->
+    <div class="table-card">
+      <div class="table-head">
+        <div class="table-title">All Trades</div>
+        <div style="font-size:10px;color:#374060;">
+          ${hasFilters?`${sorted.length} of ${tradesAll.length} trades`:`${sorted.length} total`}
+          ${totalPages>1?` · Page ${tradesPage} of ${totalPages}`:''}
+        </div>
+      </div>
+      ${sorted.length?`
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr><th>Date</th><th>Symbol</th>${showAcct?'<th>Account</th>':''}<th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>Net P&amp;L</th><th>Fees</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      ${buildPager()}
+      `:`<div style="padding:40px 20px;text-align:center;color:#4b5a7a;font-size:13px;">${hasFilters?'No trades match your filters':'No trades to display'}</div>`}
+    </div>`;
 }
 
 // Calendar state
