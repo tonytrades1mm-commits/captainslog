@@ -2513,6 +2513,66 @@ function renderCalendar(preserveScroll=false){
       weekPnl=0;weekHas=false;
     }
   }
+
+  // Build day detail panel
+  let detailHTML = '';
+  if(calSelectedDay){
+    const dayTrades = (tradesByDay[calSelectedDay]||[]).sort((a,b)=>a.date-b.date);
+    const dayPnl = byDay[calSelectedDay]||0;
+    const dayWins = dayTrades.filter(t=>t.pnl>0);
+    const dayLosses = dayTrades.filter(t=>t.pnl<0);
+    const dayWR = dayTrades.length?(dayWins.length/dayTrades.length*100).toFixed(0):0;
+    const dayAvgWin = dayWins.length?dayWins.reduce((s,t)=>s+t.pnl,0)/dayWins.length:0;
+    const dayAvgLoss = dayLosses.length?dayLosses.reduce((s,t)=>s+t.pnl,0)/dayLosses.length:0;
+    const dayBest = dayWins.length?Math.max(...dayWins.map(t=>t.pnl)):0;
+    const dayWorst = dayLosses.length?Math.min(...dayLosses.map(t=>t.pnl)):0;
+    const dayFees = dayTrades.reduce((s,t)=>s+t.fees,0);
+    const dayNetPnl = dayTrades.reduce((s,t)=>s+t.netPnl,0);
+    const dateLabel = new Date(calSelectedDay).toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+    const showAcctCol = calAccountFilter==='all' && activeAccounts.length>1;
+
+    detailHTML=`<div class="day-detail" id="dayDetail">
+      <div class="day-detail-header">
+        <div class="day-detail-title">${dateLabel}</div>
+        <div class="day-detail-close" onclick="calSelectedDay=null;renderCalendar()">✕</div>
+      </div>
+      <div class="day-stat-row">
+        <div class="day-stat"><div class="day-stat-label">Gross P&amp;L</div><div class="day-stat-val" style="color:${dayPnl>=0?'#22c55e':'#ef4444'}">${fmt(dayPnl)}</div></div>
+        <div class="day-stat"><div class="day-stat-label">Net P&amp;L</div><div class="day-stat-val" style="color:${dayNetPnl>=0?'#22c55e':'#ef4444'}">${fmt(dayNetPnl)}</div></div>
+        <div class="day-stat"><div class="day-stat-label">Trades</div><div class="day-stat-val" style="color:#e2e8f0;">${dayTrades.length}</div></div>
+        <div class="day-stat"><div class="day-stat-label">Win Rate</div><div class="day-stat-val" style="color:${dayWR>=50?'#22c55e':'#ef4444'}">${dayWR}%</div></div>
+        <div class="day-stat"><div class="day-stat-label">Avg Win</div><div class="day-stat-val" style="color:#22c55e;">${dayWins.length?fmt(dayAvgWin):'–'}</div></div>
+        <div class="day-stat"><div class="day-stat-label">Avg Loss</div><div class="day-stat-val" style="color:#ef4444;">${dayLosses.length?fmt(dayAvgLoss):'–'}</div></div>
+        <div class="day-stat"><div class="day-stat-label">Best Trade</div><div class="day-stat-val" style="color:#22c55e;">${dayWins.length?fmt(dayBest):'–'}</div></div>
+        <div class="day-stat"><div class="day-stat-label">Worst Trade</div><div class="day-stat-val" style="color:#ef4444;">${dayLosses.length?fmt(dayWorst):'–'}</div></div>
+        <div class="day-stat"><div class="day-stat-label">Fees Paid</div><div class="day-stat-val" style="color:#6b7898;">$${dayFees.toFixed(2)}</div></div>
+      </div>
+      ${dayTrades.length?`
+        <div style="margin-bottom:16px;">
+          <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:10px;">Intraday P&amp;L Curve</div>
+          <div style="position:relative;height:160px;"><canvas id="intradayChart" role="img" aria-label="Intraday equity curve">Intraday PnL</canvas></div>
+        </div>
+        <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;">Trade Breakdown</div>
+        ${dayTrades.map(t=>`
+          <div class="day-trade-row">
+            <div class="day-trade-sym">${t.symbol}</div>
+            <div class="day-trade-side"><span class="pill ${t.side==='Long'?'pill-l':'pill-s'}">${t.side.toUpperCase()}</span></div>
+            ${showAcctCol?`<div><span class="acct-chip" style="background:${t.accountColor}20;color:${t.accountColor}">${t.accountName}</span></div>`:''}
+            <div style="flex:1;font-family:'DM Mono',monospace;font-size:10px;color:#6b7898;">
+              ${t.entry?'@'+t.entry.toFixed(2):''}${t.exit&&t.exit>0?' → '+t.exit.toFixed(2):''} · ${t.qty} ct
+            </div>
+            <div style="font-size:10px;color:#4b5a7a;font-family:'DM Mono',monospace;min-width:60px;text-align:right;">
+              ${t.date.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})}
+            </div>
+            <div class="day-trade-pnl" style="color:${t.pnl>=0?'#22c55e':'#ef4444'}">${fmt(t.pnl)}</div>
+          </div>`).join('')}
+      `:`<div style="color:#4b5a7a;font-size:12px;text-align:center;padding:16px;">No trades on this day</div>`}
+    </div>`;
+    if(dayTrades.length){
+      setTimeout(()=>drawIntradayChart('intradayChart', dayTrades, activeAccounts),80);
+    }
+  }
+
   document.getElementById('calendarView').innerHTML=`
     <div class="filter-bar">
       <div class="page-title">Calendar</div>
