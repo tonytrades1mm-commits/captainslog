@@ -311,9 +311,23 @@ input[type=file]{display:none;}
   .mob-nav-btn .mob-icon{font-size:18px;line-height:1;}
   .mob-nav-btn span{font-size:9px;}
 
-  /* HEADER — stack balance + goal vertically */
+  /* HEADER — stack balance + goal vertically and reduce padding */
   .body > .content > div[style*="background:#0c0e14"] > div[style*="grid-template-columns:1fr 1fr"]{
     grid-template-columns:1fr !important;
+    gap:10px !important;
+  }
+  /* Reduce inner panel padding on mobile so they fit */
+  .body > .content > div[style*="background:#0c0e14"]{
+    padding:12px !important;
+  }
+  .body > .content > div[style*="background:#0c0e14"] > div[style*="grid-template-columns:1fr 1fr"] > div{
+    padding:14px !important;
+    overflow:hidden;
+  }
+  /* Ensure all child content stays inside */
+  .body > .content > div[style*="background:#0c0e14"] *{
+    max-width:100%;
+    box-sizing:border-box;
   }
 
   /* STAT GRID — 2 columns on mobile */
