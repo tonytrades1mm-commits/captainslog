@@ -449,6 +449,11 @@ input[type=file]{display:none;}
     </select>
     <div class="modal-label">Color</div>
     <div class="color-row" id="colorRow"></div>
+    <div class="modal-label">Prop Firm (for commission calculation)</div>
+    <select class="modal-input" id="acctPropFirm">
+      <option value="">— None —</option>
+    </select>
+    <div class="modal-hint">Tag this account with a prop firm and commissions auto-calculate. <span style="color:#3b82f6;cursor:pointer;" onclick="closeModal('addAccountModal');showPropFirmModal()">Manage prop firms →</span></div>
     <hr class="modal-divider">
     <div style="font-size:12px;color:#6b7898;margin-bottom:14px;">Trailing Drawdown Settings (optional)</div>
     <div class="modal-label">Starting Balance ($)</div>
@@ -540,6 +545,44 @@ input[type=file]{display:none;}
   </div>
 </div>
 
+<!-- PROP FIRM MODAL -->
+<div class="modal-bg" id="propFirmModal">
+  <div class="modal" style="max-width:560px;">
+    <div class="modal-title" id="propFirmModalTitle">Manage Prop Firms</div>
+    <div style="font-size:12px;color:#6b7898;margin-bottom:14px;">Set commission rates per symbol for each prop firm. Tag accounts with a prop firm and fees will auto-calculate.</div>
+
+    <!-- LIST OF PROP FIRMS -->
+    <div id="propFirmList" style="margin-bottom:14px;"></div>
+
+    <button class="btn btn-ghost" style="width:100%;margin-bottom:14px;" onclick="newPropFirm()">＋ Add Prop Firm</button>
+
+    <!-- EDITING PANEL -->
+    <div id="propFirmEditPanel" style="display:none;border-top:1px solid #1a1f2e;padding-top:14px;">
+      <input type="hidden" id="pfEditId"/>
+      <div class="modal-label">Prop Firm Name</div>
+      <input class="modal-input" id="pfName" placeholder="e.g. Apex, TPT, TopStep"/>
+      <div class="modal-label">Color</div>
+      <div class="color-row" id="pfColorRow"></div>
+
+      <div class="modal-label">Commission Rates per Symbol</div>
+      <div style="font-size:11px;color:#6b7898;margin-bottom:8px;">Round-trip rate per contract. Use <code style="background:#161b28;padding:1px 5px;border-radius:3px;color:#c8d4e8;">default</code> as fallback. Symbol prefixes work (e.g. NQ matches NQH6, NQM6).</div>
+      <div id="pfRatesList" style="margin-bottom:10px;"></div>
+      <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;" onclick="addRateRow()">＋ Add Rate</button>
+
+      <div class="modal-actions" style="margin-top:14px;">
+        <button class="btn btn-danger" id="pfDeleteBtn" style="display:none;" onclick="deletePropFirm()">Delete</button>
+        <div style="flex:1;"></div>
+        <button class="btn btn-ghost" onclick="cancelPropFirmEdit()">Cancel</button>
+        <button class="btn btn-primary" onclick="savePropFirm()">Save</button>
+      </div>
+    </div>
+
+    <div class="modal-actions" style="margin-top:14px;">
+      <button class="btn btn-ghost" onclick="closeModal('propFirmModal')">Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-bg" id="importModal">
   <div class="modal" style="max-width:640px;">
     <div class="modal-title">Import Trades</div>
@@ -608,7 +651,7 @@ const sb={
   async del(t,q){const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}${q}`,{method:'DELETE',headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`,'Content-Type':'application/json'}});if(!r.ok)throw new Error(await r.text());}
 };
 
-let state={accounts:[],groups:[],selectedIds:new Set(),activeGroupId:null,activeTab:'dashboard'};
+let state={accounts:[],groups:[],propFirms:[],commissionRates:[],selectedIds:new Set(),activeGroupId:null,activeTab:'dashboard'};
 let charts={};
 const COLORS=[{bg:'#1d4ed8'},{bg:'#16a34a'},{bg:'#9333ea'},{bg:'#ea580c'},{bg:'#0891b2'},{bg:'#e11d48'},{bg:'#ca8a04'},{bg:'#475569'}];
 let selectedColor=COLORS[0];
@@ -702,21 +745,38 @@ function calcTrailingDD(acct) {
 async function loadData(){
   setSyncStatus('syncing','Loading...');
   try{
-    const[accounts,trades,withdrawals,groups]=await Promise.all([
+    const[accounts,trades,withdrawals,groups,propFirms,commRates]=await Promise.all([
       sb.get('accounts','?order=created_at.asc'),
       sb.get('trades','?order=date.asc'),
       sb.get('withdrawals','?order=date.asc'),
-      sb.get('groups','?order=created_at.asc')
+      sb.get('groups','?order=created_at.asc'),
+      sb.get('prop_firms','?order=created_at.asc'),
+      sb.get('commission_rates','?order=created_at.asc')
     ]);
-    state.accounts=accounts.map(a=>({
-      ...a,
-      starting_balance: a.starting_balance ? parseFloat(a.starting_balance) : null,
-      max_drawdown: a.max_drawdown ? parseFloat(a.max_drawdown) : null,
-      profit_goal: a.profit_goal ? parseFloat(a.profit_goal) : null,
-      trades:trades.filter(t=>t.account_id===a.id).map(t=>({date:new Date(t.date),symbol:t.symbol,side:t.side,qty:t.qty,entry:t.entry,exit:t.exit,pnl:t.pnl,fees:t.fees,netPnl:t.net_pnl,dbId:t.id})),
-      withdrawals:withdrawals.filter(w=>w.account_id===a.id).map(w=>({id:w.id,amount:parseFloat(w.amount),date:new Date(w.date),note:w.note||''}))
-    }));
-    state.groups=groups.map(g=>({...g,account_ids:g.account_ids||[]}));
+    state.propFirms=propFirms||[];
+    state.commissionRates=(commRates||[]).map(r=>({...r,rate_per_contract:parseFloat(r.rate_per_contract)}));
+    state.groups=(groups||[]).map(g=>({...g,account_ids:g.account_ids||[]}));
+    state.accounts=accounts.map(a=>{
+      const acctTrades=trades.filter(t=>t.account_id===a.id).map(t=>{
+        const tr={
+          date:new Date(t.date),symbol:t.symbol,side:t.side,qty:t.qty,
+          entry:t.entry,exit:t.exit,pnl:t.pnl,fees:t.fees,netPnl:t.net_pnl,dbId:t.id,
+          accountId:a.id
+        };
+        return tr;
+      });
+      return{
+        ...a,
+        starting_balance: a.starting_balance ? parseFloat(a.starting_balance) : null,
+        max_drawdown: a.max_drawdown ? parseFloat(a.max_drawdown) : null,
+        profit_goal: a.profit_goal ? parseFloat(a.profit_goal) : null,
+        prop_firm_id: a.prop_firm_id || null,
+        trades:acctTrades,
+        withdrawals:withdrawals.filter(w=>w.account_id===a.id).map(w=>({id:w.id,amount:parseFloat(w.amount),date:new Date(w.date),note:w.note||''}))
+      };
+    });
+    // Recalculate fees from prop firm rates (override stored fees if rate is set)
+    applyCommissionRates();
     setSyncStatus('ok','Synced');
     document.getElementById('emptyTitle').textContent=state.accounts.length?'No trades yet':'No accounts yet';
     document.getElementById('emptySub').textContent=state.accounts.length?'Import a Tradovate CSV to get started.':'Create your first account to get started.';
@@ -725,8 +785,55 @@ async function loadData(){
   }catch(e){setSyncStatus('err','Connection error');document.getElementById('emptyTitle').textContent='Could not connect';document.getElementById('emptySub').textContent='Check your internet connection.';toast('Failed to connect','error');}
 }
 
+// Calculate commission for a trade based on symbol + qty + prop firm rates
+function calcCommission(trade, acctPropFirmId){
+  if(!acctPropFirmId) return null; // no prop firm assigned, leave fees alone
+  const rates=state.commissionRates.filter(r=>r.prop_firm_id===acctPropFirmId);
+  if(!rates.length) return null;
+  const sym=(trade.symbol||'').toUpperCase();
+  // Try exact match first, then prefix match (e.g. NQH6 matches "NQ"), then 'default' or '*'
+  let rate=rates.find(r=>r.symbol_pattern.toUpperCase()===sym);
+  if(!rate){
+    // Prefix match — sort by longest pattern first so MNQ wins over NQ
+    const sortedRates=[...rates].sort((a,b)=>b.symbol_pattern.length-a.symbol_pattern.length);
+    rate=sortedRates.find(r=>{
+      const pat=r.symbol_pattern.toUpperCase();
+      if(pat==='*'||pat==='DEFAULT')return false;
+      return sym.startsWith(pat);
+    });
+  }
+  if(!rate){
+    rate=rates.find(r=>r.symbol_pattern.toUpperCase()==='*'||r.symbol_pattern.toUpperCase()==='DEFAULT');
+  }
+  if(!rate) return null;
+  return Math.abs(rate.rate_per_contract * (trade.qty||1));
+}
+
+function applyCommissionRates(){
+  state.accounts.forEach(a=>{
+    if(!a.prop_firm_id) return;
+    a.trades.forEach(t=>{
+      const fee=calcCommission(t, a.prop_firm_id);
+      if(fee!==null){
+        t.fees=fee;
+        t.netPnl=t.pnl-fee;
+      }
+    });
+  });
+}
+
 // ── ACCOUNT CRUD ──────────────────────────────────────────────────────────────
-function showAddAccount(){document.getElementById('acctName').value='';document.getElementById('acctStartBal').value='';document.getElementById('acctMaxDD').value='';document.getElementById('acctProfitGoal').value='';selectedColor=COLORS[0];renderColorSwatches();openModal('addAccountModal');}
+function showAddAccount(){
+  document.getElementById('acctName').value='';
+  document.getElementById('acctStartBal').value='';
+  document.getElementById('acctMaxDD').value='';
+  document.getElementById('acctProfitGoal').value='';
+  // Populate prop firm dropdown
+  document.getElementById('acctPropFirm').innerHTML='<option value="">— None —</option>'+
+    state.propFirms.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+  selectedColor=COLORS[0];renderColorSwatches();
+  openModal('addAccountModal');
+}
 function renderColorSwatches(){document.getElementById('colorRow').innerHTML=COLORS.map((c,i)=>`<div class="color-swatch${c===selectedColor?' selected':''}" style="background:${c.bg}" onclick="pickColor(${i})"></div>`).join('');}
 function pickColor(i){selectedColor=COLORS[i];renderColorSwatches();}
 
@@ -735,9 +842,10 @@ async function createAccount(){
   const startBal=parseFloat(document.getElementById('acctStartBal').value)||null;
   const maxDD=parseFloat(document.getElementById('acctMaxDD').value)||null;
   const profitGoal=parseFloat(document.getElementById('acctProfitGoal').value)||null;
-  const acct={id:'acct_'+Date.now(),name,type:document.getElementById('acctType').value,color:selectedColor.bg,starting_balance:startBal,max_drawdown:maxDD,profit_goal:profitGoal,created_at:new Date().toISOString()};
+  const propFirmId=document.getElementById('acctPropFirm').value||null;
+  const acct={id:'acct_'+Date.now(),name,type:document.getElementById('acctType').value,color:selectedColor.bg,starting_balance:startBal,max_drawdown:maxDD,profit_goal:profitGoal,prop_firm_id:propFirmId,created_at:new Date().toISOString()};
   setSyncStatus('syncing','Saving...');
-  try{await sb.post('accounts',acct);state.accounts.push({...acct,trades:[]});setSyncStatus('ok','Synced');toast('Account created','success');closeModal('addAccountModal');state.selectedIds.clear();state.selectedIds.add(acct.id);renderAll();}
+  try{await sb.post('accounts',acct);state.accounts.push({...acct,trades:[],withdrawals:[]});setSyncStatus('ok','Synced');toast('Account created','success');closeModal('addAccountModal');state.selectedIds.clear();state.selectedIds.add(acct.id);renderAll();}
   catch(e){setSyncStatus('err','Save failed');toast('Failed: '+e.message,'error');}
 }
 
@@ -933,6 +1041,183 @@ function clearGroup(){
   state.activeGroupId=null;
   state.selectedIds.clear();
   renderAll();
+}
+
+// ── PROP FIRM CRUD ────────────────────────────────────────────────────────────
+let pfSelectedColor='#3b82f6';
+const PF_COLORS=['#3b82f6','#22c55e','#9333ea','#ea580c','#0891b2','#e11d48','#ca8a04','#475569','#f59e0b','#06b6d4'];
+
+function showPropFirmModal(){
+  renderPropFirmList();
+  document.getElementById('propFirmEditPanel').style.display='none';
+  openModal('propFirmModal');
+}
+
+function renderPropFirmList(){
+  const list=document.getElementById('propFirmList');
+  if(!state.propFirms.length){
+    list.innerHTML=`<div style="color:#4b5a7a;font-size:12px;text-align:center;padding:18px;background:#0c0e14;border-radius:8px;border:1px dashed #1e2535;">No prop firms yet. Add one to start tracking commissions.</div>`;
+    return;
+  }
+  list.innerHTML=state.propFirms.map(p=>{
+    const rates=state.commissionRates.filter(r=>r.prop_firm_id===p.id);
+    const acctCount=state.accounts.filter(a=>a.prop_firm_id===p.id).length;
+    return`<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#161b28;border-radius:8px;margin-bottom:6px;cursor:pointer;border:1px solid transparent;" onclick="editPropFirm('${p.id}')" onmouseover="this.style.borderColor='#2a3558'" onmouseout="this.style.borderColor='transparent'">
+      <div style="width:10px;height:10px;border-radius:50%;background:${p.color};flex-shrink:0;"></div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:12px;color:#c8d4e8;font-weight:500;">${p.name}</div>
+        <div style="font-size:10px;color:#6b7898;margin-top:2px;">${rates.length} rate${rates.length!==1?'s':''} · ${acctCount} account${acctCount!==1?'s':''}</div>
+      </div>
+      <span style="color:#6b7898;font-size:11px;">✎</span>
+    </div>`;
+  }).join('');
+}
+
+function newPropFirm(){
+  document.getElementById('propFirmModalTitle').textContent='New Prop Firm';
+  document.getElementById('pfEditId').value='';
+  document.getElementById('pfName').value='';
+  pfSelectedColor=PF_COLORS[0];
+  renderPfColorSwatches();
+  renderPfRatesList([]);
+  document.getElementById('pfDeleteBtn').style.display='none';
+  document.getElementById('propFirmEditPanel').style.display='block';
+}
+
+function editPropFirm(id){
+  const p=state.propFirms.find(x=>x.id===id);if(!p)return;
+  document.getElementById('propFirmModalTitle').textContent='Edit '+p.name;
+  document.getElementById('pfEditId').value=id;
+  document.getElementById('pfName').value=p.name;
+  pfSelectedColor=p.color||PF_COLORS[0];
+  renderPfColorSwatches();
+  const rates=state.commissionRates.filter(r=>r.prop_firm_id===id);
+  renderPfRatesList(rates);
+  document.getElementById('pfDeleteBtn').style.display='inline-flex';
+  document.getElementById('propFirmEditPanel').style.display='block';
+}
+
+function renderPfColorSwatches(){
+  document.getElementById('pfColorRow').innerHTML=PF_COLORS.map(c=>
+    `<div class="color-swatch${c===pfSelectedColor?' selected':''}" style="background:${c}" onclick="pfPickColor('${c}')"></div>`
+  ).join('');
+}
+function pfPickColor(c){pfSelectedColor=c;renderPfColorSwatches();}
+
+function renderPfRatesList(rates){
+  document.getElementById('pfRatesList').innerHTML=rates.map((r,i)=>renderRateRow(r.symbol_pattern, r.rate_per_contract, i)).join('') +
+    (rates.length===0?renderRateRow('default',0,0):'');
+}
+
+function renderRateRow(pattern, rate, idx){
+  return`<div class="pf-rate-row" data-idx="${idx}" style="display:flex;gap:6px;margin-bottom:5px;align-items:center;">
+    <input type="text" placeholder="NQ, MNQ, ES..." value="${pattern||''}" class="pf-rate-symbol" style="background:#161b28;border:1px solid #1e2540;border-radius:6px;padding:6px 10px;color:#c8d4e8;font-family:'DM Sans',sans-serif;font-size:11px;width:120px;text-transform:uppercase;"/>
+    <span style="font-size:11px;color:#6b7898;">$</span>
+    <input type="number" step="0.01" placeholder="4.50" value="${rate||''}" class="pf-rate-value" style="background:#161b28;border:1px solid #1e2540;border-radius:6px;padding:6px 10px;color:#c8d4e8;font-family:'DM Mono',monospace;font-size:11px;width:90px;"/>
+    <span style="font-size:10px;color:#6b7898;">per contract round-trip</span>
+    <button onclick="this.parentElement.remove()" style="background:transparent;border:none;color:#4b5a7a;cursor:pointer;font-size:12px;padding:4px 6px;border-radius:4px;margin-left:auto;" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='#4b5a7a'">✕</button>
+  </div>`;
+}
+
+function addRateRow(){
+  document.getElementById('pfRatesList').insertAdjacentHTML('beforeend', renderRateRow('', '', Date.now()));
+}
+
+function getRateRowsData(){
+  const rows=document.querySelectorAll('#pfRatesList .pf-rate-row');
+  const data=[];
+  rows.forEach(row=>{
+    const sym=row.querySelector('.pf-rate-symbol').value.trim().toUpperCase();
+    const rate=parseFloat(row.querySelector('.pf-rate-value').value);
+    if(sym && !isNaN(rate) && rate>=0){
+      data.push({symbol_pattern:sym, rate_per_contract:rate});
+    }
+  });
+  return data;
+}
+
+function cancelPropFirmEdit(){
+  document.getElementById('propFirmEditPanel').style.display='none';
+}
+
+async function savePropFirm(){
+  const name=document.getElementById('pfName').value.trim();
+  if(!name){toast('Please enter a name','error');return;}
+  const ratesData=getRateRowsData();
+  const editId=document.getElementById('pfEditId').value;
+  setSyncStatus('syncing','Saving...');
+  try{
+    let pfId;
+    if(editId){
+      await sb.patch('prop_firms',`?id=eq.${editId}`,{name,color:pfSelectedColor});
+      const pf=state.propFirms.find(x=>x.id===editId);
+      pf.name=name;pf.color=pfSelectedColor;
+      pfId=editId;
+      // Delete all existing rates and re-insert
+      await sb.del('commission_rates',`?prop_firm_id=eq.${editId}`);
+      state.commissionRates=state.commissionRates.filter(r=>r.prop_firm_id!==editId);
+    } else {
+      pfId='pf_'+Date.now();
+      const pf={id:pfId,name,color:pfSelectedColor,created_at:new Date().toISOString()};
+      await sb.post('prop_firms',pf);
+      state.propFirms.push(pf);
+    }
+    // Insert rates
+    if(ratesData.length){
+      const rateRows=ratesData.map(r=>({
+        id:'rate_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
+        prop_firm_id:pfId,
+        symbol_pattern:r.symbol_pattern,
+        rate_per_contract:r.rate_per_contract,
+        created_at:new Date().toISOString()
+      }));
+      await sb.post('commission_rates',rateRows);
+      state.commissionRates.push(...rateRows);
+    }
+    // Recalc fees and update UI
+    applyCommissionRates();
+    setSyncStatus('ok','Synced');
+    toast('Prop firm saved','success');
+    document.getElementById('propFirmEditPanel').style.display='none';
+    renderPropFirmList();
+    renderAll();
+  }catch(e){setSyncStatus('err','Save failed');toast('Failed: '+e.message,'error');}
+}
+
+async function deletePropFirm(){
+  const id=document.getElementById('pfEditId').value;
+  const pf=state.propFirms.find(x=>x.id===id);if(!pf)return;
+  const acctsUsing=state.accounts.filter(a=>a.prop_firm_id===id).length;
+  const msg=acctsUsing>0
+    ?`Delete "${pf.name}"? ${acctsUsing} account${acctsUsing>1?'s':''} will be untagged.`
+    :`Delete "${pf.name}"?`;
+  if(!confirm(msg))return;
+  setSyncStatus('syncing','Deleting...');
+  try{
+    await sb.del('prop_firms',`?id=eq.${id}`);
+    state.propFirms=state.propFirms.filter(p=>p.id!==id);
+    state.commissionRates=state.commissionRates.filter(r=>r.prop_firm_id!==id);
+    state.accounts.forEach(a=>{if(a.prop_firm_id===id) a.prop_firm_id=null;});
+    applyCommissionRates();
+    setSyncStatus('ok','Synced');
+    toast('Prop firm deleted','success');
+    document.getElementById('propFirmEditPanel').style.display='none';
+    renderPropFirmList();
+    renderAll();
+  }catch(e){setSyncStatus('err','Delete failed');toast('Failed: '+e.message,'error');}
+}
+
+async function setAccountPropFirm(acctId, propFirmId){
+  setSyncStatus('syncing','Saving...');
+  try{
+    await sb.patch('accounts',`?id=eq.${acctId}`,{prop_firm_id:propFirmId||null});
+    const acct=state.accounts.find(a=>a.id===acctId);
+    acct.prop_firm_id=propFirmId||null;
+    applyCommissionRates();
+    setSyncStatus('ok','Synced');
+    toast(propFirmId?'Prop firm assigned':'Prop firm removed','success');
+    renderAll();
+  }catch(e){setSyncStatus('err','Save failed');toast('Failed: '+e.message,'error');}
 }
 
 function showEditDD(id){
@@ -2664,7 +2949,10 @@ function renderAccountsView(){
   document.getElementById('emptyState').style.display='none';
   document.getElementById('accountsView').style.display='block';
   document.getElementById('accountsView').innerHTML=`
-    <div class="filter-bar"><div class="page-title">Manage Accounts</div><div class="spacer"></div><button class="btn btn-primary" onclick="showAddAccount()">+ Add Account</button></div>
+    <div class="filter-bar"><div class="page-title">Manage Accounts</div><div class="spacer"></div>
+      <button class="btn btn-ghost" onclick="showPropFirmModal()">🏢 Prop Firms</button>
+      <button class="btn btn-primary" onclick="showAddAccount()">+ Add Account</button>
+    </div>
     ${!state.accounts.length?'<div class="empty-state"><div class="empty-icon">🗂</div><div class="empty-title">No accounts yet</div></div>':
     state.accounts.map(a=>{
       const t=a.trades,netPnl=t.reduce((s,x)=>s+x.netPnl,0),wins=t.filter(x=>x.pnl>0).length;
@@ -2674,15 +2962,18 @@ function renderAccountsView(){
       const bal=currentBalance(a);
       const wd=totalWithdrawals(a);
       const wdList=(a.withdrawals||[]).sort((x,y)=>y.date-x.date);
+      const totalFees=t.reduce((s,x)=>s+(x.fees||0),0);
+      const propFirm=state.propFirms.find(p=>p.id===a.prop_firm_id);
       return`<div class="acct-mgr-row${isBlown?' blown':''}" style="flex-direction:column;align-items:stretch;">
-        <div style="display:flex;align-items:center;gap:10px;">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <div style="width:38px;height:38px;border-radius:9px;background:${a.color}20;color:${a.color};font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${a.name[0].toUpperCase()}</div>
-          <div class="acct-mgr-info">
-            <div class="acct-mgr-name">${a.name}${isBlown?'<span style="font-size:10px;background:#2b0808;color:#ef4444;padding:2px 6px;border-radius:4px;font-weight:500;margin-left:6px;">BLOWN</span>':''}</div>
+          <div class="acct-mgr-info" style="flex:1;min-width:200px;">
+            <div class="acct-mgr-name">${a.name}${isBlown?'<span style="font-size:10px;background:#2b0808;color:#ef4444;padding:2px 6px;border-radius:4px;font-weight:500;margin-left:6px;">BLOWN</span>':''}${propFirm?`<span style="font-size:10px;background:${propFirm.color}20;color:${propFirm.color};padding:2px 6px;border-radius:4px;font-weight:500;margin-left:6px;">${propFirm.name}</span>`:''}</div>
             <div class="acct-mgr-meta">
               ${a.type} · ${t.length} trades · WR: ${wr}${wr!=='–'?'%':''}
               ${bal!==null?` · Balance: <span style="color:#fff;font-family:'DM Mono',monospace;">${fmtC(bal)}</span>`:''}
               ${wd>0?` · Withdrawn: <span style="color:#f59e0b;font-family:'DM Mono',monospace;">${fmtC(wd)}</span>`:''}
+              ${totalFees>0?` · Fees: <span style="color:#6b7898;font-family:'DM Mono',monospace;">$${totalFees.toFixed(0)}</span>`:''}
               ${dd?` · Floor: ${fmtC(dd.currentFloor)}`:''}
             </div>
           </div>
@@ -2693,6 +2984,15 @@ function renderAccountsView(){
           <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;color:#f59e0b;border-color:#f59e0b40;" onclick="showWithdrawalModal('${a.id}')">💸 Payout</button>
           <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="showImportForAcct('${a.id}')">↑ Import</button>
           <button class="btn btn-danger" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="deleteAccount('${a.id}')">Delete</button>
+        </div>
+        <!-- Prop firm selector -->
+        <div style="margin-top:8px;display:flex;align-items:center;gap:8px;">
+          <span style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;">Prop Firm:</span>
+          <select onchange="setAccountPropFirm('${a.id}', this.value)" style="background:#161b28;border:1px solid #1e2540;border-radius:6px;padding:4px 8px;color:#c8d4e8;font-family:'DM Sans',sans-serif;font-size:11px;">
+            <option value="" ${!a.prop_firm_id?'selected':''}>— None —</option>
+            ${state.propFirms.map(p=>`<option value="${p.id}" ${a.prop_firm_id===p.id?'selected':''}>${p.name}</option>`).join('')}
+          </select>
+          <span style="font-size:10px;color:#3b82f6;cursor:pointer;" onclick="showPropFirmModal()">Manage Prop Firms →</span>
         </div>
         ${wdList.length?`<div style="margin-top:10px;padding-top:10px;border-top:1px solid #1a1f2e;">
           <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px;">Payout History</div>
