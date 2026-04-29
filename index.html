@@ -2381,7 +2381,50 @@ function dashCalClickDay(dateKey){
 }
 
 function dc(k){if(charts[k]){charts[k].destroy();charts[k]=null;}}
-function drawEquity(trades){const c=document.getElementById('eqChart');if(!c)return;dc('eq');let cum=0;const data=trades.map(t=>{cum+=t.netPnl;return parseFloat(cum.toFixed(2));});const labels=trades.map(t=>t.date.toLocaleDateString('en-US',{month:'short',day:'numeric'}));const pos=!data.length||data[data.length-1]>=0;charts.eq=new Chart(c,{type:'line',data:{labels,datasets:[{data,borderColor:pos?'#22c55e':'#ef4444',borderWidth:2,pointRadius:trades.length>60?0:2,fill:true,backgroundColor:pos?'rgba(34,197,94,0.07)':'rgba(239,68,68,0.07)',tension:.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmt(c.raw)}}},scales:{x:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9},maxTicksLimit:8}},y:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9},callback:v=>'$'+v.toLocaleString()}}}}});}
+function drawEquity(trades){
+  const c=document.getElementById('eqChart');if(!c)return;dc('eq');
+  let cum=0;
+  const data=trades.map(t=>{cum+=t.netPnl;return parseFloat(cum.toFixed(2));});
+  const labels=trades.map(t=>t.date.toLocaleDateString('en-US',{month:'short',day:'numeric'}));
+  // Segment-level coloring: red when both endpoints are negative or below 0, green when positive
+  const segColor=(ctx)=>{
+    const{p0,p1}=ctx;
+    if(!p0||!p1) return '#22c55e';
+    // Use whichever endpoint is more relevant — average to handle crossings smoothly
+    const avg=(p0.parsed.y + p1.parsed.y)/2;
+    return avg<0 ? '#ef4444' : '#22c55e';
+  };
+  const segBg=(ctx)=>{
+    const{p0,p1}=ctx;
+    if(!p0||!p1) return 'rgba(34,197,94,0.07)';
+    const avg=(p0.parsed.y + p1.parsed.y)/2;
+    return avg<0 ? 'rgba(239,68,68,0.10)' : 'rgba(34,197,94,0.07)';
+  };
+  charts.eq=new Chart(c,{
+    type:'line',
+    data:{labels,datasets:[{
+      data,
+      borderColor:'#22c55e',
+      borderWidth:2,
+      pointRadius:trades.length>60?0:2,
+      fill:{target:'origin'},
+      backgroundColor:'rgba(34,197,94,0.07)',
+      tension:.4,
+      segment:{
+        borderColor:segColor,
+        backgroundColor:segBg
+      }
+    }]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmt(c.raw)}}},
+      scales:{
+        x:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9},maxTicksLimit:8}},
+        y:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9},callback:v=>'$'+v.toLocaleString()}}
+      }
+    }
+  });
+}
 function drawDaily(trades){const c=document.getElementById('dayChart');if(!c)return;dc('day');const byDay={};trades.forEach(t=>{const d=t.date.toLocaleDateString('en-US',{month:'short',day:'numeric'});byDay[d]=(byDay[d]||0)+t.netPnl;});const labels=Object.keys(byDay).slice(-30);const data=labels.map(l=>parseFloat(byDay[l].toFixed(2)));charts.day=new Chart(c,{type:'bar',data:{labels,datasets:[{data,backgroundColor:data.map(v=>v>=0?'#22c55e':'#ef4444'),borderRadius:2}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmt(c.raw)}}},scales:{x:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9},maxTicksLimit:12}},y:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9},callback:v=>'$'+v}}}}});}
 function drawWL(w,l){const c=document.getElementById('wlChart');if(!c)return;dc('wl');charts.wl=new Chart(c,{type:'doughnut',data:{labels:['Wins','Losses'],datasets:[{data:[w,l],backgroundColor:['#22c55e','#ef4444'],borderColor:'#0c0e14',borderWidth:3}]},options:{responsive:true,maintainAspectRatio:false,cutout:'65%',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.label+': '+c.raw}}}}});}
 function drawSymbols(trades){const el=document.getElementById('symBreak');if(!el)return;const m={};trades.forEach(t=>{if(!m[t.symbol])m[t.symbol]={pnl:0};m[t.symbol].pnl+=t.netPnl;});const sorted=Object.entries(m).sort((a,b)=>Math.abs(b[1].pnl)-Math.abs(a[1].pnl)).slice(0,7);if(!sorted.length)return;const max=Math.max(...sorted.map(s=>Math.abs(s[1].pnl)));el.innerHTML=sorted.map(([sym,d])=>`<div class="prog-row"><div class="prog-label" style="font-family:'DM Mono',monospace;font-size:10px;">${sym}</div><div class="prog-track"><div class="prog-fill ${d.pnl>=0?'g':'r'}" style="width:${(Math.abs(d.pnl)/max*100).toFixed(0)}%"></div></div><div class="prog-val" style="font-size:10px;color:${d.pnl>=0?'#22c55e':'#ef4444'}">${fmtM(d.pnl)}</div></div>`).join('');}
@@ -2422,11 +2465,23 @@ function buildIntradayDatasets(dayTrades, activeAccounts){
     });
   });
 
-  const finalColor=cum>=0?'#22c55e':'#ef4444';
+  // Per-segment colors based on whether portion is above/below zero
+  const segColor=(ctx)=>{
+    const{p0,p1}=ctx;
+    if(!p0||!p1) return '#22c55e';
+    const avg=(p0.parsed.y + p1.parsed.y)/2;
+    return avg<0 ? '#ef4444' : '#22c55e';
+  };
+  const segBg=(ctx)=>{
+    const{p0,p1}=ctx;
+    if(!p0||!p1) return 'rgba(34,197,94,0.08)';
+    const avg=(p0.parsed.y + p1.parsed.y)/2;
+    return avg<0 ? 'rgba(239,68,68,0.10)' : 'rgba(34,197,94,0.08)';
+  };
   const datasets=[{
     label:'Running P&L',
     data:combinedData,
-    borderColor:finalColor,
+    borderColor:'#22c55e',
     borderWidth:2.5,
     pointRadius:pointRadii,
     pointBackgroundColor:pointColors,
@@ -2434,9 +2489,13 @@ function buildIntradayDatasets(dayTrades, activeAccounts){
     pointBorderWidth:2,
     pointHoverRadius:9,
     pointHoverBorderWidth:3,
-    fill:true,
-    backgroundColor:cum>=0?'rgba(34,197,94,0.08)':'rgba(239,68,68,0.08)',
+    fill:{target:'origin'},
+    backgroundColor:'rgba(34,197,94,0.08)',
     tension:.25,
+    segment:{
+      borderColor:segColor,
+      backgroundColor:segBg
+    },
     _tradeMeta: tradeMeta  // Custom property for tooltips
   }];
 
