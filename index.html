@@ -366,6 +366,28 @@ input[type=file]{display:none;}
 }
 </style>
 <body>
+
+<!-- LOGIN SCREEN -->
+<div id="loginScreen" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#0a0c11;z-index:10000;align-items:center;justify-content:center;">
+  <div style="background:#0c0e14;border:1px solid #1a1f2e;border-radius:14px;padding:40px;width:90vw;max-width:400px;">
+    <div style="text-align:center;margin-bottom:28px;">
+      <div style="font-size:48px;margin-bottom:8px;">🚀</div>
+      <div style="font-size:22px;font-weight:600;color:#fff;letter-spacing:-.3px;">Moonshot Dreams</div>
+      <div style="font-size:12px;color:#6b7898;margin-top:4px;" id="loginSubtitle">Sign in to your trading journal</div>
+    </div>
+    <div class="modal-label">Email</div>
+    <input class="modal-input" id="loginEmail" type="email" placeholder="you@example.com" autocomplete="email"/>
+    <div class="modal-label">Password</div>
+    <input class="modal-input" id="loginPassword" type="password" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"/>
+    <div id="loginError" style="color:#ef4444;font-size:11px;margin:8px 0;display:none;"></div>
+    <button class="btn btn-primary" style="width:100%;margin-top:14px;padding:10px;font-size:13px;" id="loginBtn" onclick="doLogin()">Sign In</button>
+    <div style="margin-top:16px;text-align:center;font-size:12px;color:#6b7898;">
+      <span id="loginToggleHint">First time?</span>
+      <span style="color:#3b82f6;cursor:pointer;margin-left:4px;" id="loginToggleBtn" onclick="toggleSignupMode()">Create an account</span>
+    </div>
+  </div>
+</div>
+
 <div class="app">
 <nav>
   <button class="hamburger" id="hamburger" onclick="toggleSidebar()">
@@ -382,6 +404,7 @@ input[type=file]{display:none;}
     <div class="sync-bar"><div class="sync-dot syncing" id="syncDot"></div><span id="syncLabel">Connecting...</span></div>
     <button class="btn btn-ghost" onclick="showImportModal()">↑ Import CSV</button>
     <button class="btn btn-primary" onclick="showAddAccount()">+ Account</button>
+    <button class="btn btn-ghost" id="logoutBtn" style="font-size:11px;padding:5px 10px;display:none;" onclick="doLogout()">⏻ Logout</button>
   </div>
 </nav>
 <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
@@ -644,11 +667,85 @@ input[type=file]{display:none;}
 const SUPABASE_URL='https://syjwahkwsvkohleknmna.supabase.co';
 const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN5andhaGt3c3Zrb2hsZWtubW5hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4NTg2MDMsImV4cCI6MjA5MjQzNDYwM30.DpZlMPXfcQzSEj47sKvtWXYFfYfy7vkoAv7YWPxp7Wg';
 
+// Auth state
+let authSession = null;
+let authUserId = null;
+
+function getAuthHeaders(){
+  const token = authSession?.access_token || SUPABASE_KEY;
+  return {
+    apikey: SUPABASE_KEY,
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  };
+}
+
 const sb={
-  async get(t,q=''){const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}${q}`,{headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`,'Content-Type':'application/json'}});if(!r.ok)throw new Error(await r.text());return r.json();},
-  async post(t,d){const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}`,{method:'POST',headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`,'Content-Type':'application/json',Prefer:'return=minimal'},body:JSON.stringify(d)});if(!r.ok)throw new Error(await r.text());},
-  async patch(t,q,d){const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}${q}`,{method:'PATCH',headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`,'Content-Type':'application/json',Prefer:'return=minimal'},body:JSON.stringify(d)});if(!r.ok)throw new Error(await r.text());},
-  async del(t,q){const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}${q}`,{method:'DELETE',headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`,'Content-Type':'application/json'}});if(!r.ok)throw new Error(await r.text());}
+  async get(t,q=''){const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}${q}`,{headers:getAuthHeaders()});if(!r.ok)throw new Error(await r.text());return r.json();},
+  async post(t,d){
+    // Inject user_id if authenticated and not already present (skips for non-RLS tables)
+    if(authUserId){
+      if(Array.isArray(d)) d=d.map(row=>row.user_id?row:{...row,user_id:authUserId});
+      else if(d && typeof d==='object' && !d.user_id) d={...d,user_id:authUserId};
+    }
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}`,{method:'POST',headers:{...getAuthHeaders(),Prefer:'return=minimal'},body:JSON.stringify(d)});if(!r.ok)throw new Error(await r.text());
+  },
+  async patch(t,q,d){const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}${q}`,{method:'PATCH',headers:{...getAuthHeaders(),Prefer:'return=minimal'},body:JSON.stringify(d)});if(!r.ok)throw new Error(await r.text());},
+  async del(t,q){const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}${q}`,{method:'DELETE',headers:getAuthHeaders()});if(!r.ok)throw new Error(await r.text());}
+};
+
+// ── AUTH FUNCTIONS ────────────────────────────────────────────────────────────
+const auth = {
+  async signUp(email, password){
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
+      method:'POST',
+      headers:{apikey:SUPABASE_KEY,'Content-Type':'application/json'},
+      body:JSON.stringify({email,password})
+    });
+    const data = await r.json();
+    if(!r.ok) throw new Error(data.msg || data.error_description || 'Signup failed');
+    return data;
+  },
+  async signIn(email, password){
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+      method:'POST',
+      headers:{apikey:SUPABASE_KEY,'Content-Type':'application/json'},
+      body:JSON.stringify({email,password})
+    });
+    const data = await r.json();
+    if(!r.ok) throw new Error(data.msg || data.error_description || 'Login failed');
+    return data;
+  },
+  async signOut(){
+    if(!authSession) return;
+    await fetch(`${SUPABASE_URL}/auth/v1/logout`,{
+      method:'POST',
+      headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${authSession.access_token}`}
+    }).catch(()=>{});
+    localStorage.removeItem('moonshot_session');
+    authSession = null;
+    authUserId = null;
+  },
+  loadSession(){
+    try{
+      const stored = localStorage.getItem('moonshot_session');
+      if(stored){
+        const s = JSON.parse(stored);
+        // Check if expired
+        if(s.expires_at && s.expires_at*1000 > Date.now()){
+          authSession = s;
+          authUserId = s.user?.id || null;
+          return true;
+        }
+      }
+    }catch(e){}
+    return false;
+  },
+  saveSession(s){
+    authSession = s;
+    authUserId = s.user?.id || null;
+    localStorage.setItem('moonshot_session', JSON.stringify(s));
+  }
 };
 
 let state={accounts:[],groups:[],propFirms:[],commissionRates:[],selectedIds:new Set(),activeGroupId:null,activeTab:'dashboard'};
@@ -3230,7 +3327,85 @@ function checkGoalAchievements(showPopup=true){
 }
 
 renderColorSwatches();
-loadData();
+
+// ── AUTH UI HANDLERS ──────────────────────────────────────────────────────────
+let isSignupMode = false;
+
+function toggleSignupMode(){
+  isSignupMode = !isSignupMode;
+  document.getElementById('loginSubtitle').textContent = isSignupMode ? 'Create your account' : 'Sign in to your trading journal';
+  document.getElementById('loginBtn').textContent = isSignupMode ? 'Create Account' : 'Sign In';
+  document.getElementById('loginToggleHint').textContent = isSignupMode ? 'Already have an account?' : 'First time?';
+  document.getElementById('loginToggleBtn').textContent = isSignupMode ? 'Sign in' : 'Create an account';
+  document.getElementById('loginError').style.display='none';
+}
+
+function showLoginError(msg){
+  const el = document.getElementById('loginError');
+  el.textContent = msg;
+  el.style.display='block';
+}
+
+async function doLogin(){
+  const email = document.getElementById('loginEmail').value.trim();
+  const pw = document.getElementById('loginPassword').value;
+  if(!email || !pw){ showLoginError('Please enter email and password'); return; }
+  const btn = document.getElementById('loginBtn');
+  btn.textContent = isSignupMode ? 'Creating...' : 'Signing in...';
+  btn.disabled = true;
+  try{
+    let session;
+    if(isSignupMode){
+      const data = await auth.signUp(email, pw);
+      // Some Supabase configs auto-confirm and return session, others require email confirmation
+      if(data.session){
+        session = data.session;
+      } else {
+        showLoginError('Account created! Check your email to confirm, then sign in.');
+        toggleSignupMode();
+        btn.textContent = 'Sign In';
+        btn.disabled = false;
+        return;
+      }
+    } else {
+      session = await auth.signIn(email, pw);
+    }
+    auth.saveSession(session);
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('logoutBtn').style.display = 'inline-flex';
+    loadData();
+  } catch(e){
+    showLoginError(e.message);
+    btn.textContent = isSignupMode ? 'Create Account' : 'Sign In';
+    btn.disabled = false;
+  }
+}
+
+async function doLogout(){
+  if(!confirm('Sign out of Moonshot Dreams?')) return;
+  await auth.signOut();
+  // Clear in-memory state
+  state.accounts = [];
+  state.groups = [];
+  state.propFirms = [];
+  state.commissionRates = [];
+  state.selectedIds.clear();
+  // Show login screen
+  document.getElementById('loginScreen').style.display = 'flex';
+  document.getElementById('logoutBtn').style.display = 'none';
+  document.getElementById('loginEmail').value = '';
+  document.getElementById('loginPassword').value = '';
+}
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+if(auth.loadSession()){
+  // Have a valid session — load data
+  document.getElementById('logoutBtn').style.display = 'inline-flex';
+  loadData();
+} else {
+  // Show login screen
+  document.getElementById('loginScreen').style.display = 'flex';
+}
 </script>
 </body>
 </html>
