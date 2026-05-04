@@ -3097,6 +3097,15 @@ function renderCalendar(preserveScroll=false){
     const dayBest = dayWins.length?Math.max(...dayWins.map(t=>t.netPnl)):0;
     const dayWorst = dayLosses.length?Math.min(...dayLosses.map(t=>t.netPnl)):0;
     const dayFees = dayTrades.reduce((s,t)=>s+t.fees,0);
+
+    // Winners/Losers totals for the day (net of fees)
+    const dayWinnersGross = dayWins.reduce((s,t)=>s+t.pnl,0);
+    const dayWinnersFees = dayWins.reduce((s,t)=>s+t.fees,0);
+    const dayWinnersNet = dayWins.reduce((s,t)=>s+t.netPnl,0);
+    const dayLosersGross = dayLosses.reduce((s,t)=>s+t.pnl,0);
+    const dayLosersFees = dayLosses.reduce((s,t)=>s+t.fees,0);
+    const dayLosersNet = dayLosses.reduce((s,t)=>s+t.netPnl,0);
+
     const dateLabel = new Date(calSelectedDay).toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
     const showAcctCol = calAccountFilter==='all' && activeAccounts.length>1;
 
@@ -3105,16 +3114,47 @@ function renderCalendar(preserveScroll=false){
         <div class="day-detail-title">${dateLabel}</div>
         <div class="day-detail-close" onclick="calSelectedDay=null;renderCalendar()">✕</div>
       </div>
+
+      <!-- Winners / Losers / Net cards for this day -->
+      ${dayTrades.length?`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px;">
+        <!-- WINNERS -->
+        <div style="background:linear-gradient(135deg,#091a10,#0a1a0e);border:1px solid #22c55e30;border-radius:9px;padding:12px;">
+          <div style="font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">Winners (Net)</div>
+          <div style="font-size:20px;font-weight:700;font-family:'DM Mono',monospace;color:#22c55e;letter-spacing:-.5px;line-height:1;margin-bottom:8px;">${fmtM(dayWinnersNet)}</div>
+          <div style="display:flex;flex-direction:column;gap:3px;font-size:10px;">
+            <div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Gross:</span><span style="font-family:'DM Mono',monospace;color:#86efac;">${fmtM(dayWinnersGross)}</span></div>
+            <div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Fees:</span><span style="font-family:'DM Mono',monospace;color:#f59e0b;">−$${dayWinnersFees.toFixed(2)}</span></div>
+            <div style="display:flex;justify-content:space-between;color:#6b7898;border-top:1px solid #1a1f2e;padding-top:3px;margin-top:1px;"><span>Trades:</span><span style="font-family:'DM Mono',monospace;color:#c8d4e8;">${dayWins.length}</span></div>
+          </div>
+        </div>
+        <!-- LOSERS -->
+        <div style="background:linear-gradient(135deg,#1a0808,#180a0a);border:1px solid #ef444430;border-radius:9px;padding:12px;">
+          <div style="font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">Losers (Net)</div>
+          <div style="font-size:20px;font-weight:700;font-family:'DM Mono',monospace;color:#ef4444;letter-spacing:-.5px;line-height:1;margin-bottom:8px;">${fmtM(dayLosersNet)}</div>
+          <div style="display:flex;flex-direction:column;gap:3px;font-size:10px;">
+            <div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Gross:</span><span style="font-family:'DM Mono',monospace;color:#fca5a5;">${fmtM(dayLosersGross)}</span></div>
+            <div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Fees:</span><span style="font-family:'DM Mono',monospace;color:#f59e0b;">−$${dayLosersFees.toFixed(2)}</span></div>
+            <div style="display:flex;justify-content:space-between;color:#6b7898;border-top:1px solid #1a1f2e;padding-top:3px;margin-top:1px;"><span>Trades:</span><span style="font-family:'DM Mono',monospace;color:#c8d4e8;">${dayLosses.length}</span></div>
+          </div>
+        </div>
+        <!-- NET -->
+        <div style="background:${dayNetPnl>=0?'linear-gradient(135deg,#0c1420,#0a1828)':'linear-gradient(135deg,#1a0c14,#180a18)'};border:1px solid ${dayNetPnl>=0?'#3b82f640':'#ef444440'};border-radius:9px;padding:12px;">
+          <div style="font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">Net P&amp;L</div>
+          <div style="font-size:20px;font-weight:700;font-family:'DM Mono',monospace;color:${dayNetPnl>=0?'#3b82f6':'#ef4444'};letter-spacing:-.5px;line-height:1;margin-bottom:8px;">${fmtM(dayNetPnl)}</div>
+          <div style="display:flex;flex-direction:column;gap:3px;font-size:10px;">
+            <div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Total Trades:</span><span style="font-family:'DM Mono',monospace;color:#c8d4e8;">${dayTrades.length}</span></div>
+            <div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Total Fees:</span><span style="font-family:'DM Mono',monospace;color:#f59e0b;">−$${dayFees.toFixed(2)}</span></div>
+            <div style="display:flex;justify-content:space-between;color:#6b7898;border-top:1px solid #1a1f2e;padding-top:3px;margin-top:1px;"><span>Avg/Trade:</span><span style="font-family:'DM Mono',monospace;color:${dayNetPnl>=0?'#22c55e':'#ef4444'};">${fmt(dayNetPnl/dayTrades.length)}</span></div>
+          </div>
+        </div>
+      </div>`:''}
+
       <div class="day-stat-row">
-        <div class="day-stat"><div class="day-stat-label">Gross P&amp;L</div><div class="day-stat-val" style="color:${dayGross>=0?'#22c55e':'#ef4444'}">${fmt(dayGross)}</div></div>
-        <div class="day-stat"><div class="day-stat-label">Net P&amp;L</div><div class="day-stat-val" style="color:${dayNetPnl>=0?'#22c55e':'#ef4444'}">${fmt(dayNetPnl)}</div></div>
-        <div class="day-stat"><div class="day-stat-label">Trades</div><div class="day-stat-val" style="color:#e2e8f0;">${dayTrades.length}</div></div>
         <div class="day-stat"><div class="day-stat-label">Win Rate</div><div class="day-stat-val" style="color:${dayWR>=50?'#22c55e':'#ef4444'}">${dayWR}%</div></div>
         <div class="day-stat"><div class="day-stat-label">Avg Win</div><div class="day-stat-val" style="color:#22c55e;">${dayWins.length?fmt(dayAvgWin):'–'}</div></div>
         <div class="day-stat"><div class="day-stat-label">Avg Loss</div><div class="day-stat-val" style="color:#ef4444;">${dayLosses.length?fmt(dayAvgLoss):'–'}</div></div>
         <div class="day-stat"><div class="day-stat-label">Best Trade</div><div class="day-stat-val" style="color:#22c55e;">${dayWins.length?fmt(dayBest):'–'}</div></div>
         <div class="day-stat"><div class="day-stat-label">Worst Trade</div><div class="day-stat-val" style="color:#ef4444;">${dayLosses.length?fmt(dayWorst):'–'}</div></div>
-        <div class="day-stat"><div class="day-stat-label">Fees Paid</div><div class="day-stat-val" style="color:#6b7898;">$${dayFees.toFixed(2)}</div></div>
       </div>
       ${dayTrades.length?`
         <div style="margin-bottom:16px;">
