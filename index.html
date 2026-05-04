@@ -2743,8 +2743,60 @@ function renderAnalytics(trades){
   const months=Object.entries(monthMap).sort((a,b)=>a[0].localeCompare(b[0]));
   const monthNames=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const ddSeries=[];let pk=0;for(const v of curve){if(v>pk)pk=v;ddSeries.push(pk>0?(pk-v)/pk*100:0);}
+
+  // Winners and Losers totals (NET of fees)
+  const winners=trades.filter(t=>t.netPnl>0);
+  const losers=trades.filter(t=>t.netPnl<0);
+  const totalWinnersGross=winners.reduce((s,t)=>s+t.pnl,0);
+  const totalWinnersFees=winners.reduce((s,t)=>s+t.fees,0);
+  const totalWinnersNet=winners.reduce((s,t)=>s+t.netPnl,0);
+  const totalLosersGross=losers.reduce((s,t)=>s+t.pnl,0);
+  const totalLosersFees=losers.reduce((s,t)=>s+t.fees,0);
+  const totalLosersNet=losers.reduce((s,t)=>s+t.netPnl,0);
+  const totalNet=totalWinnersNet+totalLosersNet;
+  const totalFees=totalWinnersFees+totalLosersFees;
+
   document.getElementById('analyticsView').innerHTML=`
     <div class="filter-bar"><div class="page-title">Analytics — ${getSelectionLabel()}</div>${renderSelPills()}<div class="spacer"></div><button class="btn btn-ghost" onclick="showImportModal()">↑ Import CSV</button></div>
+
+    <!-- WINNERS / LOSERS / NET TOTALS -->
+    <div class="section-title">Winners vs Losers (Net of Fees)</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:24px;">
+
+      <!-- WINNERS CARD -->
+      <div style="background:linear-gradient(135deg,#091a10,#0a1a0e);border:1px solid #22c55e30;border-radius:10px;padding:18px;">
+        <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px;">Winners (Net)</div>
+        <div style="font-size:30px;font-weight:700;font-family:'DM Mono',monospace;color:#22c55e;letter-spacing:-.5px;line-height:1;margin-bottom:10px;">${fmtM(totalWinnersNet)}</div>
+        <div style="display:flex;flex-direction:column;gap:5px;font-size:11px;">
+          <div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Gross:</span><span style="font-family:'DM Mono',monospace;color:#86efac;">${fmtM(totalWinnersGross)}</span></div>
+          <div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Fees Paid:</span><span style="font-family:'DM Mono',monospace;color:#f59e0b;">−$${totalWinnersFees.toFixed(2)}</span></div>
+          <div style="display:flex;justify-content:space-between;color:#6b7898;border-top:1px solid #1a1f2e;padding-top:5px;margin-top:3px;"><span>Trades:</span><span style="font-family:'DM Mono',monospace;color:#c8d4e8;">${winners.length}</span></div>
+        </div>
+      </div>
+
+      <!-- LOSERS CARD -->
+      <div style="background:linear-gradient(135deg,#1a0808,#180a0a);border:1px solid #ef444430;border-radius:10px;padding:18px;">
+        <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px;">Losers (Net)</div>
+        <div style="font-size:30px;font-weight:700;font-family:'DM Mono',monospace;color:#ef4444;letter-spacing:-.5px;line-height:1;margin-bottom:10px;">${fmtM(totalLosersNet)}</div>
+        <div style="display:flex;flex-direction:column;gap:5px;font-size:11px;">
+          <div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Gross:</span><span style="font-family:'DM Mono',monospace;color:#fca5a5;">${fmtM(totalLosersGross)}</span></div>
+          <div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Fees Paid:</span><span style="font-family:'DM Mono',monospace;color:#f59e0b;">−$${totalLosersFees.toFixed(2)}</span></div>
+          <div style="display:flex;justify-content:space-between;color:#6b7898;border-top:1px solid #1a1f2e;padding-top:5px;margin-top:3px;"><span>Trades:</span><span style="font-family:'DM Mono',monospace;color:#c8d4e8;">${losers.length}</span></div>
+        </div>
+      </div>
+
+      <!-- NET CARD -->
+      <div style="background:${totalNet>=0?'linear-gradient(135deg,#0c1420,#0a1828)':'linear-gradient(135deg,#1a0c14,#180a18)'};border:1px solid ${totalNet>=0?'#3b82f640':'#ef444440'};border-radius:10px;padding:18px;">
+        <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px;">Net P&amp;L</div>
+        <div style="font-size:30px;font-weight:700;font-family:'DM Mono',monospace;color:${totalNet>=0?'#3b82f6':'#ef4444'};letter-spacing:-.5px;line-height:1;margin-bottom:10px;">${fmtM(totalNet)}</div>
+        <div style="display:flex;flex-direction:column;gap:5px;font-size:11px;">
+          <div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Total Trades:</span><span style="font-family:'DM Mono',monospace;color:#c8d4e8;">${trades.length}</span></div>
+          <div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Total Fees:</span><span style="font-family:'DM Mono',monospace;color:#f59e0b;">−$${totalFees.toFixed(2)}</span></div>
+          <div style="display:flex;justify-content:space-between;color:#6b7898;border-top:1px solid #1a1f2e;padding-top:5px;margin-top:3px;"><span>Avg per Trade:</span><span style="font-family:'DM Mono',monospace;color:${totalNet>=0?'#22c55e':'#ef4444'};">${trades.length?fmt(totalNet/trades.length):'–'}</span></div>
+        </div>
+      </div>
+    </div>
+
     <div class="section-title">Drawdown Analysis</div>
     <div class="g4"><div class="stat-card"><div class="stat-label">Max Drawdown $</div><div class="stat-val r">${fmtM(-maxDD)}</div><div class="stat-sub">Peak to trough</div></div><div class="stat-card"><div class="stat-label">Max Drawdown %</div><div class="stat-val r">${maxDDPct.toFixed(2)}%</div><div class="stat-sub">% from equity peak</div></div><div class="stat-card"><div class="stat-label">Current DD</div><div class="stat-val ${curDD>0?'r':'g'}">${curDDPct.toFixed(2)}%</div><div class="stat-sub">${curDD>0?fmtM(-curDD)+' from peak':'At peak equity'}</div></div><div class="stat-card"><div class="stat-label">Recovery Factor</div><div class="stat-val b">${maxDD>0?(trades.reduce((s,t)=>s+t.pnl,0)/maxDD).toFixed(2):'–'}</div><div class="stat-sub">Net P&amp;L / Max DD</div></div></div>
     <div class="chart-card" style="margin-bottom:20px;"><div class="chart-head"><span class="chart-title">Drawdown Over Time</span><span class="chip red">% from peak</span></div><div style="position:relative;height:180px;"><canvas id="ddChart" role="img" aria-label="Drawdown">DD</canvas></div></div>
