@@ -2473,10 +2473,40 @@ function renderWeeklySummary(trades){
 }
 
 // ── TILT DAY DETECTION ────────────────────────────────────────────────────────
-// A "tilt day" is one where the trader had 3+ consecutive losing trades
+// A "tilt day" is one where the trader had 3+ consecutive losing TRADES
+// IMPORTANT: Tradovate splits a single trade into multiple fills (e.g. 4 contracts = 2 fills of 2).
+// We group fills with same minute timestamp + same symbol + same side as ONE logical trade.
+function groupFills(trades){
+  const sorted=[...trades].sort((a,b)=>a.date-b.date);
+  const groups=[];
+  for(const t of sorted){
+    // Round timestamp to nearest minute for grouping
+    const key=`${Math.floor(t.date.getTime()/60000)}|${t.symbol}|${t.side}`;
+    const existing=groups.find(g=>g.key===key);
+    if(existing){
+      existing.pnl+=t.pnl;
+      existing.netPnl+=t.netPnl;
+      existing.qty+=t.qty;
+      existing.fees+=t.fees;
+    } else {
+      groups.push({
+        key,
+        date:t.date,
+        symbol:t.symbol,
+        side:t.side,
+        pnl:t.pnl,
+        netPnl:t.netPnl,
+        qty:t.qty,
+        fees:t.fees
+      });
+    }
+  }
+  return groups;
+}
+
 function detectTiltDays(trades){
   const tiltDays=new Set();
-  // Group trades by day, sort each by time
+  // Group trades by day
   const byDay={};
   trades.forEach(t=>{
     const k=t.date.toDateString();
@@ -2484,10 +2514,11 @@ function detectTiltDays(trades){
     byDay[k].push(t);
   });
   Object.entries(byDay).forEach(([day,dayTrades])=>{
-    const sorted=[...dayTrades].sort((a,b)=>a.date-b.date);
+    // Group same-minute fills into logical trades
+    const logical=groupFills(dayTrades);
     let lossStreak=0;
     let maxLossStreak=0;
-    for(const t of sorted){
+    for(const t of logical){
       if(t.netPnl<0){
         lossStreak++;
         if(lossStreak>maxLossStreak) maxLossStreak=lossStreak;
