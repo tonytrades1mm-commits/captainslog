@@ -139,6 +139,8 @@ input[type=file]{display:none;}
 .cal-d.win:hover{background:#0d2518;border-color:#22c55e40;}
 .cal-d.loss{background:#1a0909;color:#ef4444;}
 .cal-d.loss:hover{background:#220c0c;border-color:#ef444440;}
+.cal-d.tilt{box-shadow:inset 0 0 0 1.5px #f59e0b80;}
+.cal-d.tilt:hover{box-shadow:inset 0 0 0 1.5px #f59e0b;}
 .cal-d.today{outline:1px solid #2563eb;}
 .cal-d.selected{outline:2px solid #fff !important;transform:scale(1.05);z-index:2;}
 .cal-dn{font-size:11px;opacity:.6;margin-bottom:3px;font-weight:500;}
@@ -2155,6 +2157,9 @@ function renderDashboard(trades){
       <div id="dashStreakBar" style="margin-top:14px;padding-top:12px;border-top:1px solid #1a1f2e;"></div>
     </div>
 
+    <!-- WEEKLY SUMMARY CARD -->
+    <div id="weeklySummaryCard" style="margin-bottom:16px;"></div>
+
     <!-- EQUITY CURVE (bigger, under calendar) -->
     <div class="chart-card" style="margin-bottom:16px;">
       <div class="chart-head"><span class="chart-title">Cumulative P&amp;L</span><span class="chip">Equity Curve</span></div>
@@ -2199,7 +2204,7 @@ function renderDashboard(trades){
       <div id="symBreak"></div>
     </div>
     </div>`;
-  setTimeout(()=>{drawEquity(trades);drawDaily(trades);drawWL(wins.length,losses.length);drawSymbols(trades);drawHourly(trades);drawTodayIntraday(trades);renderDashCal(trades);checkGoalAchievements(true);},50);
+  setTimeout(()=>{drawEquity(trades);drawDaily(trades);drawWL(wins.length,losses.length);drawSymbols(trades);drawHourly(trades);drawTodayIntraday(trades);renderDashCal(trades);renderWeeklySummary(trades);checkGoalAchievements(true);},50);
 }
 
 function renderSelBreakdown(){
@@ -2332,6 +2337,169 @@ function renderStreakBar(trades,containerId){
   </div>`;
 }
 
+// ── WEEKLY SUMMARY ────────────────────────────────────────────────────────────
+function renderWeeklySummary(trades){
+  const el=document.getElementById('weeklySummaryCard');
+  if(!el)return;
+  if(!trades.length){el.innerHTML='';return;}
+
+  // Helper: get start of week (Sunday) for a given date
+  const startOfWeek=(d)=>{
+    const x=new Date(d);
+    x.setHours(0,0,0,0);
+    x.setDate(x.getDate()-x.getDay()); // Sunday
+    return x;
+  };
+  const endOfWeek=(d)=>{
+    const x=startOfWeek(d);
+    x.setDate(x.getDate()+7);
+    return x;
+  };
+
+  const now=new Date();
+  const thisWeekStart=startOfWeek(now);
+  const thisWeekEnd=endOfWeek(now);
+  const lastWeekStart=new Date(thisWeekStart);
+  lastWeekStart.setDate(lastWeekStart.getDate()-7);
+  const lastWeekEnd=new Date(thisWeekStart);
+
+  const thisWeekTrades=trades.filter(t=>t.date>=thisWeekStart && t.date<thisWeekEnd);
+  const lastWeekTrades=trades.filter(t=>t.date>=lastWeekStart && t.date<lastWeekEnd);
+
+  // Stats helper
+  const calcStats=(ts)=>{
+    if(!ts.length) return{pnl:0,trades:0,wins:0,losses:0,wr:0,bestDay:null,bestDayPnl:0,worstDay:null,worstDayPnl:0,daysTraded:0};
+    const pnl=ts.reduce((s,t)=>s+t.netPnl,0);
+    const wins=ts.filter(t=>t.netPnl>0).length;
+    const losses=ts.filter(t=>t.netPnl<0).length;
+    const wr=ts.length?wins/ts.length*100:0;
+    // Group by day to find best/worst
+    const byDay={};
+    ts.forEach(t=>{const k=t.date.toDateString();byDay[k]=(byDay[k]||0)+t.netPnl;});
+    const dayEntries=Object.entries(byDay);
+    let bestDay=null,bestDayPnl=-Infinity,worstDay=null,worstDayPnl=Infinity;
+    for(const[d,p] of dayEntries){
+      if(p>bestDayPnl){bestDayPnl=p;bestDay=d;}
+      if(p<worstDayPnl){worstDayPnl=p;worstDay=d;}
+    }
+    return{pnl,trades:ts.length,wins,losses,wr,bestDay,bestDayPnl,worstDay,worstDayPnl,daysTraded:dayEntries.length};
+  };
+
+  const tw=calcStats(thisWeekTrades);
+  const lw=calcStats(lastWeekTrades);
+
+  // Comparison: trend arrows and % change
+  const pnlDiff=tw.pnl-lw.pnl;
+  const tradesDiff=tw.trades-lw.trades;
+  const wrDiff=tw.wr-lw.wr;
+  const trendArrow=(d)=>d>0?'<span style="color:#22c55e;">↑</span>':d<0?'<span style="color:#ef4444;">↓</span>':'<span style="color:#6b7898;">→</span>';
+  const trendColor=(d)=>d>0?'#22c55e':d<0?'#ef4444':'#6b7898';
+
+  // Format date helper
+  const fmtDay=(d)=>d?new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'–';
+
+  // Week label
+  const weekStartLabel=thisWeekStart.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+  const weekEndLabelDate=new Date(thisWeekEnd);
+  weekEndLabelDate.setDate(weekEndLabelDate.getDate()-1);
+  const weekEndLabel=weekEndLabelDate.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+
+  el.innerHTML=`
+    <div class="chart-card" style="background:linear-gradient(135deg,#0c0e14,#0d1119);">
+      <div class="chart-head">
+        <span class="chart-title">📊 Weekly Summary</span>
+        <span style="font-size:11px;color:#6b7898;">${weekStartLabel} — ${weekEndLabel}</span>
+      </div>
+
+      ${tw.trades===0?`
+        <div style="text-align:center;padding:24px 12px;color:#4b5a7a;font-size:13px;">
+          No trades yet this week. Take it easy out there. 🚀
+        </div>
+      `:`
+      <div style="display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:14px;align-items:start;">
+
+        <!-- Main P&L panel -->
+        <div style="background:${tw.pnl>=0?'linear-gradient(135deg,#091a10,#0a1a0e)':'linear-gradient(135deg,#1a0808,#180a0a)'};border:1px solid ${tw.pnl>=0?'#22c55e30':'#ef444430'};border-radius:9px;padding:14px;">
+          <div style="font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">This Week (Net)</div>
+          <div style="font-size:30px;font-weight:700;font-family:'DM Mono',monospace;color:${tw.pnl>=0?'#22c55e':'#ef4444'};letter-spacing:-.5px;line-height:1;margin-bottom:8px;">${fmtM(tw.pnl)}</div>
+          <div style="display:flex;flex-wrap:wrap;gap:14px;font-size:11px;color:#6b7898;">
+            <span><strong style="color:#c8d4e8;font-family:'DM Mono',monospace;">${tw.trades}</strong> trades</span>
+            <span><strong style="color:${tw.wr>=50?'#22c55e':'#ef4444'};font-family:'DM Mono',monospace;">${tw.wr.toFixed(0)}%</strong> WR</span>
+            <span><strong style="color:#c8d4e8;font-family:'DM Mono',monospace;">${tw.daysTraded}</strong> day${tw.daysTraded!==1?'s':''}</span>
+          </div>
+        </div>
+
+        <!-- Best/Worst Day -->
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div style="background:#0c1414;border:1px solid #22c55e30;border-radius:9px;padding:10px 12px;">
+            <div style="font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:2px;">Best Day</div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">
+              <span style="font-size:11px;color:#86efac;">${fmtDay(tw.bestDay)}</span>
+              <span style="font-size:16px;font-weight:700;font-family:'DM Mono',monospace;color:#22c55e;">${fmtM(tw.bestDayPnl)}</span>
+            </div>
+          </div>
+          <div style="background:#140c0c;border:1px solid #ef444430;border-radius:9px;padding:10px 12px;">
+            <div style="font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:2px;">Worst Day</div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">
+              <span style="font-size:11px;color:#fca5a5;">${fmtDay(tw.worstDay)}</span>
+              <span style="font-size:16px;font-weight:700;font-family:'DM Mono',monospace;color:#ef4444;">${fmtM(tw.worstDayPnl)}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- vs Last Week -->
+        <div style="background:#111520;border:1px solid #1a1f2e;border-radius:9px;padding:12px;">
+          <div style="font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;">vs Last Week</div>
+          <div style="display:flex;flex-direction:column;gap:6px;font-size:11px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span style="color:#6b7898;">P&amp;L</span>
+              <span style="font-family:'DM Mono',monospace;color:${trendColor(pnlDiff)};font-weight:600;">${trendArrow(pnlDiff)} ${pnlDiff>=0?'+':''}${fmtM(pnlDiff)}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span style="color:#6b7898;">Trades</span>
+              <span style="font-family:'DM Mono',monospace;color:${trendColor(tradesDiff)};font-weight:600;">${trendArrow(tradesDiff)} ${tradesDiff>=0?'+':''}${tradesDiff}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span style="color:#6b7898;">Win Rate</span>
+              <span style="font-family:'DM Mono',monospace;color:${trendColor(wrDiff)};font-weight:600;">${trendArrow(wrDiff)} ${wrDiff>=0?'+':''}${wrDiff.toFixed(1)}%</span>
+            </div>
+            ${lw.trades===0?`<div style="font-size:9px;color:#4b5a7a;font-style:italic;text-align:center;margin-top:4px;">No trades last week</div>`:''}
+          </div>
+        </div>
+      </div>
+      `}
+    </div>
+  `;
+}
+
+// ── TILT DAY DETECTION ────────────────────────────────────────────────────────
+// A "tilt day" is one where the trader had 3+ consecutive losing trades
+function detectTiltDays(trades){
+  const tiltDays=new Set();
+  // Group trades by day, sort each by time
+  const byDay={};
+  trades.forEach(t=>{
+    const k=t.date.toDateString();
+    if(!byDay[k]) byDay[k]=[];
+    byDay[k].push(t);
+  });
+  Object.entries(byDay).forEach(([day,dayTrades])=>{
+    const sorted=[...dayTrades].sort((a,b)=>a.date-b.date);
+    let lossStreak=0;
+    let maxLossStreak=0;
+    for(const t of sorted){
+      if(t.netPnl<0){
+        lossStreak++;
+        if(lossStreak>maxLossStreak) maxLossStreak=lossStreak;
+      } else if(t.netPnl>0){
+        lossStreak=0;
+      }
+    }
+    if(maxLossStreak>=3) tiltDays.add(day);
+  });
+  return tiltDays;
+}
+
 let dashCalYear = new Date().getFullYear();
 let dashCalMonth = new Date().getMonth();
 let dashCalTrades = [];
@@ -2361,6 +2529,9 @@ function renderDashCal(trades){
     byDay[k]=(byDay[k]||0)+t.netPnl;
     countByDay[k]=(countByDay[k]||0)+1;
   });
+
+  // Tilt day detection (3+ consecutive losses on same day)
+  const tiltDays=detectTiltDays(trades);
 
   const firstDay=new Date(dashCalYear,dashCalMonth,1).getDay();
   const daysInMonth=new Date(dashCalYear,dashCalMonth+1,0).getDate();
@@ -2405,8 +2576,12 @@ function renderDashCal(trades){
       const bg=pnl>=0?'#091a10':'#1a0909';
       const color=pnl>=0?'#22c55e':'#ef4444';
       const pnlLabel=Math.abs(pnl)<1000?(pnl>=0?'+':'')+pnl.toFixed(0):(pnl>=0?'+':'-')+(Math.abs(pnl)/1000).toFixed(1)+'k';
-      html+=`<div style="background:${bg};${cellStyle}${todayStyle}"
-        onclick="dashCalClickDay('${k}')" title="${k}: ${fmt(pnl)} (${tcount} trade${tcount!==1?'s':''})">
+      const isTilt=tiltDays.has(k);
+      const tiltIcon=isTilt?`<span style="position:absolute;top:2px;right:3px;font-size:10px;line-height:1;" title="Tilt day: 3+ consecutive losses">⚠️</span>`:'';
+      const tiltBorder=isTilt?`box-shadow:inset 0 0 0 1px #f59e0b80;`:'';
+      html+=`<div style="background:${bg};${cellStyle}${todayStyle}${tiltBorder}position:relative;"
+        onclick="dashCalClickDay('${k}')" title="${k}: ${fmt(pnl)} (${tcount} trade${tcount!==1?'s':''})${isTilt?' · ⚠️ Tilt day':''}">
+        ${tiltIcon}
         <div style="font-size:9px;color:${color};opacity:.5;margin-bottom:2px;">${currentDay}</div>
         <div style="font-size:12px;font-family:'DM Mono',monospace;font-weight:700;color:${color};line-height:1.2;">${pnlLabel}</div>
         <div style="font-size:8px;color:${color};opacity:.55;margin-top:2px;">${tcount}t</div>
@@ -3029,6 +3204,9 @@ function renderCalendar(preserveScroll=false){
     tradesByDay[k].push(t);
   });
 
+  // Tilt day detection (3+ consecutive losses on same day)
+  const tiltDays=detectTiltDays(trades);
+
   const firstDay = new Date(calYear,calMonth,1).getDay();
   const daysInMonth = new Date(calYear,calMonth+1,0).getDate();
   const monthName = new Date(calYear,calMonth,1).toLocaleDateString('en-US',{month:'long',year:'numeric'});
@@ -3065,11 +3243,13 @@ function renderCalendar(preserveScroll=false){
     const tcount=(tradesByDay[k]||[]).length;
     const isToday=d===now.getDate()&&calMonth===now.getMonth()&&calYear===now.getFullYear();
     const isSelected=calSelectedDay===k;
+    const isTilt=tiltDays.has(k);
     if(pnl!==undefined){
       weekPnl+=pnl;weekHas=true;
-      const cls=`cal-d ${pnl>=0?'win':'loss'}${isToday?' today':''}${isSelected?' selected':''}`;
+      const cls=`cal-d ${pnl>=0?'win':'loss'}${isToday?' today':''}${isSelected?' selected':''}${isTilt?' tilt':''}`;
       const pnlLabel=Math.abs(pnl)<1000?(pnl>=0?'+':'')+pnl.toFixed(0):(pnl>=0?'+':'-')+(Math.abs(pnl)/1000).toFixed(1)+'k';
-      cal+=`<div class="${cls}" onclick="calClickDay('${k}')"><div class="cal-dn">${d}</div><div class="cal-pnl">${pnlLabel}</div><div class="cal-trades">${tcount} trade${tcount!==1?'s':''}</div></div>`;
+      const tiltIcon=isTilt?`<span style="position:absolute;top:4px;right:4px;font-size:11px;line-height:1;" title="Tilt day: 3+ consecutive losses">⚠️</span>`:'';
+      cal+=`<div class="${cls}" onclick="calClickDay('${k}')" style="position:relative;" title="${k}: ${fmt(pnl)}${isTilt?' · ⚠️ Tilt day (3+ consecutive losses)':''}">${tiltIcon}<div class="cal-dn">${d}</div><div class="cal-pnl">${pnlLabel}</div><div class="cal-trades">${tcount} trade${tcount!==1?'s':''}</div></div>`;
     } else {
       const cls=`cal-d nt${isToday?' today':''}${isSelected?' selected':''}`;
       cal+=`<div class="${cls}" onclick="calClickDay('${k}')"><div class="cal-dn">${d}</div></div>`;
@@ -3111,9 +3291,18 @@ function renderCalendar(preserveScroll=false){
 
     detailHTML=`<div class="day-detail" id="dayDetail">
       <div class="day-detail-header">
-        <div class="day-detail-title">${dateLabel}</div>
+        <div class="day-detail-title">${dateLabel}${tiltDays.has(calSelectedDay)?'<span style="font-size:10px;background:#2a1a08;color:#f59e0b;padding:3px 8px;border-radius:5px;font-weight:500;margin-left:10px;border:1px solid #f59e0b40;">⚠️ TILT DAY</span>':''}</div>
         <div class="day-detail-close" onclick="calSelectedDay=null;renderCalendar()">✕</div>
       </div>
+
+      ${tiltDays.has(calSelectedDay)?`
+      <div style="background:#1a1408;border:1px solid #f59e0b30;border-radius:8px;padding:10px 14px;margin-bottom:14px;display:flex;align-items:center;gap:10px;">
+        <div style="font-size:18px;">⚠️</div>
+        <div style="flex:1;">
+          <div style="font-size:11px;color:#f59e0b;font-weight:600;margin-bottom:2px;">Tilt detected on this day</div>
+          <div style="font-size:10px;color:#a78854;">You had 3 or more consecutive losing trades. Reflect on what triggered the streak — was it position sizing, time of day, or chasing setups?</div>
+        </div>
+      </div>`:''}
 
       <!-- Winners / Losers / Net cards for this day -->
       ${dayTrades.length?`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px;">
