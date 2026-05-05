@@ -670,6 +670,8 @@ input[type=file]{display:none;}
   </button>
 </nav>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
 <script>
 const SUPABASE_URL='https://syjwahkwsvkohleknmna.supabase.co';
 const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN5andhaGt3c3Zrb2hsZWtubW5hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4NTg2MDMsImV4cCI6MjA5MjQzNDYwM30.DpZlMPXfcQzSEj47sKvtWXYFfYfy7vkoAv7YWPxp7Wg';
@@ -2165,7 +2167,7 @@ function renderDashboard(trades){
 
     <!-- EQUITY CURVE (bigger, under calendar) -->
     <div class="chart-card" style="margin-bottom:16px;">
-      <div class="chart-head"><span class="chart-title">Cumulative P&amp;L</span><span class="chip">Equity Curve</span></div>
+      <div class="chart-head"><span class="chart-title">Cumulative P&amp;L</span><span class="chip">Equity Curve</span><span style="flex:1;"></span><button id="eqResetZoom" onclick="if(charts.eq){charts.eq.resetZoom();}" style="background:#1a1f2b;border:1px solid #2a3142;color:#8b94a8;font-size:10px;padding:4px 10px;border-radius:4px;cursor:pointer;font-family:inherit;" title="Reset zoom (or double-click chart)">↺ Reset Zoom</button></div>
       <div style="position:relative;height:280px;"><canvas id="eqChart" role="img" aria-label="Equity curve">Equity</canvas></div>
     </div>
 
@@ -2768,6 +2770,7 @@ function drawEquity(trades){
       borderColor:'#22c55e',
       borderWidth:2,
       pointRadius:trades.length>60?0:3,
+      pointHitRadius:10,
       pointBackgroundColor:'#f59e0b',
       pointBorderColor:'#d97706',
       pointBorderWidth:1.5,
@@ -2783,7 +2786,27 @@ function drawEquity(trades){
     }]},
     options:{
       responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmt(c.raw)}}},
+      onClick:(e)=>{ if(e.native && e.native.detail===2 && charts.eq) charts.eq.resetZoom(); },
+      plugins:{
+        legend:{display:false},
+        tooltip:{callbacks:{label:c=>fmt(c.raw)}},
+        zoom:{
+          limits:{ x:{minRange:2} },
+          pan:{ enabled:true, mode:'x', modifierKey:null },
+          zoom:{
+            wheel:{ enabled:true, speed:0.1 },
+            pinch:{ enabled:true },
+            mode:'x',
+            onZoom:({chart})=>{
+              const ds=chart.data.datasets[0];
+              const {min,max}=chart.scales.x;
+              const visible=Math.max(1, max-min);
+              ds.pointRadius = visible<=60 ? 3 : 0;
+            },
+            onZoomComplete:({chart})=>{ chart.update('none'); }
+          }
+        }
+      },
       scales:{
         x:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9},maxTicksLimit:8}},
         y:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9},callback:v=>'$'+v.toLocaleString()}}
