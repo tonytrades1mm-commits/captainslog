@@ -131,7 +131,7 @@ input[type=file]{display:none;}
 .drop-sub span{color:#3b82f6;cursor:pointer;}
 .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
 .cal-dh{font-size:9px;color:#374060;text-align:center;padding:4px;text-transform:uppercase;}
-.cal-d{aspect-ratio:1;border-radius:7px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;border:1px solid transparent;position:relative;}
+.cal-d{min-height:78px;border-radius:7px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;border:1px solid transparent;position:relative;overflow:hidden;padding:4px 2px;box-sizing:border-box;}
 .cal-d.empty{background:transparent;cursor:default;border:none;}
 .cal-d.nt{background:#111520;color:#374060;}
 .cal-d.nt:hover{background:#161b28;border-color:#1e2535;}
@@ -344,9 +344,18 @@ input[type=file]{display:none;}
   /* CHARTS — full width */
   .g2,.g3{grid-template-columns:1fr !important;}
 
-  /* CALENDAR — hide week column on mobile, smaller cells */
-  .cal-pnl{font-size:10px !important;}
+  /* CALENDAR — fixed-size cells with smaller text on mobile */
+  .cal-d{min-height:56px !important;padding:2px 1px !important;}
+  .cal-dn{font-size:9px !important;margin-bottom:1px !important;}
+  .cal-pnl{font-size:10px !important;line-height:1.1 !important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
+  .cal-pnl span{display:none !important;} /* hide peak label inside .cal-pnl on mobile */
   .cal-trades{display:none;}
+  /* Dashboard mini calendar cells on mobile — keep all cells uniform height */
+  #dashCalGrid > div > div{height:56px !important;min-height:56px !important;overflow:hidden;padding:2px 1px;box-sizing:border-box;}
+  #dashCalGrid > div > div > div{font-size:10px !important;line-height:1.15 !important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
+  #dashCalGrid > div > div > div > span{display:none !important;} /* hide peak label */
+  /* Monthly summary on calendar — 2 cols on mobile */
+  .cal-month-summary{grid-template-columns:1fr 1fr !important;}
 
   /* TABLE — hide less important columns */
   .trade-hide-mobile{display:none;}
@@ -1755,15 +1764,17 @@ function renderSidebar(){
     const isBlown=dd&&dd.blown;
     const goalAchieved=a.profit_goal&&(currentBalance(a)!==null?currentBalance(a)>=a.profit_goal:grossPnl>=a.profit_goal);
     const currentBal2=currentBalance(a);
-    const pctChange=a.starting_balance?((netPnl-totalWithdrawals(a))/a.starting_balance)*100:null;
+    const wd=totalWithdrawals(a);
+    const netAfterWd=netPnl-wd;
+    const pctChange=a.starting_balance?(netAfterWd/a.starting_balance)*100:null;
     return`<div class="acct-row${soloOnly?' solo-active':''}" onclick="soloAccount('${a.id}')">
       <div class="acct-checkbox${checked?' checked':''}" onclick="toggleAccount('${a.id}',event)"></div>
       <div class="acct-avatar" style="background:${a.color}20;color:${a.color}">${a.name[0].toUpperCase()}</div>
       <div class="acct-info">
         <div class="acct-name">${a.name}</div>
         ${currentBal2!==null
-          ?`<div class="acct-pnl ${netPnl>0?'pos':netPnl<0?'neg':'neutral'}" style="font-size:11px;">${fmtC(currentBal2)}</div>
-            <div style="font-size:9px;color:${netPnl>=0?'#22c55e':'#ef4444'};font-family:'DM Mono',monospace;">${netPnl>=0?'+':''}${fmtM(netPnl)} (${pctChange>=0?'+':''}${pctChange.toFixed(1)}%)</div>`
+          ?`<div class="acct-pnl ${netAfterWd>0?'pos':netAfterWd<0?'neg':'neutral'}" style="font-size:11px;">${fmtC(currentBal2)}</div>
+            <div style="font-size:9px;color:${netAfterWd>=0?'#22c55e':'#ef4444'};font-family:'DM Mono',monospace;" title="${wd>0?`Trades: ${fmtM(netPnl)} · Payouts: -${fmtM(wd).replace('+','')}`:''}">${netAfterWd>=0?'+':''}${fmtM(netAfterWd)}${wd>0?'*':''} (${pctChange>=0?'+':''}${pctChange.toFixed(1)}%)</div>`
           :`<div class="acct-pnl ${netPnl>0?'pos':netPnl<0?'neg':'neutral'}">${a.trades.length?fmtM(netPnl):'No trades'}</div>`
         }
       </div>
@@ -1939,12 +1950,16 @@ function calcSimpleDD(trades){
 
 function renderDashboard(trades){
   const wins=trades.filter(t=>t.netPnl>0),losses=trades.filter(t=>t.netPnl<0);
-  const totalPnl=trades.reduce((s,t)=>s+t.pnl,0),netPnl=trades.reduce((s,t)=>s+t.netPnl,0);
+  const totalPnl=trades.reduce((s,t)=>s+t.pnl,0),tradesNetPnl=trades.reduce((s,t)=>s+t.netPnl,0);
+  // Withdrawals across selected accounts — payouts reduce true Net P&L
+  const activeAcctsForWd=getActiveAccounts();
+  const totalWd=activeAcctsForWd.reduce((s,a)=>s+totalWithdrawals(a),0);
+  const netPnl=tradesNetPnl-totalWd;
   const wr=trades.length?wins.length/trades.length*100:0;
   const avgWin=wins.length?wins.reduce((s,t)=>s+t.netPnl,0)/wins.length:0;
   const avgLoss=losses.length?losses.reduce((s,t)=>s+t.netPnl,0)/losses.length:0;
   const pf=losses.length&&avgLoss?Math.abs(wins.reduce((s,t)=>s+t.netPnl,0)/losses.reduce((s,t)=>s+t.netPnl,0)):0;
-  const exp=trades.length?netPnl/trades.length:0;
+  const exp=trades.length?tradesNetPnl/trades.length:0;
   const maxWin=wins.length?Math.max(...wins.map(t=>t.netPnl)):0;
   const maxLoss=losses.length?Math.min(...losses.map(t=>t.netPnl)):0;
   const fees=trades.reduce((s,t)=>s+t.fees,0);
@@ -2172,7 +2187,7 @@ function renderDashboard(trades){
     </div>
 
     <div class="stat-grid">
-      <div class="stat-card"><div class="stat-label">Net P&amp;L</div><div class="stat-val ${netPnl>=0?'g':'r'}">${fmtM(netPnl)}</div><div class="stat-sub">Gross: ${fmtM(totalPnl)}</div></div>
+      <div class="stat-card"><div class="stat-label">Net P&amp;L</div><div class="stat-val ${netPnl>=0?'g':'r'}">${fmtM(netPnl)}</div><div class="stat-sub">${totalWd>0?`After ${fmtM(totalWd)} payouts · Trades: ${fmtM(tradesNetPnl)}`:`Gross: ${fmtM(totalPnl)}`}</div></div>
       <div class="stat-card"><div class="stat-label">Win Rate</div><div class="stat-val ${wr>=50?'g':'r'}">${wr.toFixed(1)}%</div><div class="stat-sub">${wins.length}W / ${losses.length}L</div></div>
       <div class="stat-card"><div class="stat-label">Profit Factor</div><div class="stat-val ${pf>=1.5?'g':pf>=1?'b':'r'}">${pf.toFixed(2)}x</div><div class="stat-sub">${pf>=1.5?'Excellent':pf>=1?'Good':'Below 1'}</div></div>
       <div class="stat-card"><div class="stat-label">Avg Win</div><div class="stat-val g">${fmt(avgWin)}</div><div class="stat-sub">Per winning trade</div></div>
@@ -2209,7 +2224,9 @@ function renderDashboard(trades){
       <div id="symBreak"></div>
     </div>
     </div>`;
-  setTimeout(()=>{drawEquity(trades);drawDaily(trades);drawWL(wins.length,losses.length);drawSymbols(trades);drawHourly(trades);drawTodayIntraday(trades);renderDashCal(trades);renderWeeklySummary(trades);checkGoalAchievements(true);},50);
+  // Flatten withdrawals across selected accounts for equity curve
+  const allWithdrawals=activeAcctsForWd.flatMap(a=>(a.withdrawals||[]).map(w=>({...w, accountName:a.name, accountColor:a.color})));
+  setTimeout(()=>{drawEquity(trades,allWithdrawals);drawDaily(trades);drawWL(wins.length,losses.length);drawSymbols(trades);drawHourly(trades);drawTodayIntraday(trades);renderDashCal(trades);renderWeeklySummary(trades);checkGoalAchievements(true);},50);
 }
 
 function renderSelBreakdown(){
@@ -2744,11 +2761,22 @@ function dashCalClickDay(dateKey){
 }
 
 function dc(k){if(charts[k]){charts[k].destroy();charts[k]=null;}}
-function drawEquity(trades){
+function drawEquity(trades,withdrawals=[]){
   const c=document.getElementById('eqChart');if(!c)return;dc('eq');
+  // Build a chronological event stream of trades and withdrawals
+  // Each event mutates the cumulative line — trades by netPnl, withdrawals by -amount
+  const events=[
+    ...trades.map(t=>({date:t.date,delta:t.netPnl,kind:'trade'})),
+    ...withdrawals.map(w=>({date:w.date,delta:-Math.abs(w.amount),kind:'withdrawal',amount:w.amount,accountName:w.accountName||'',note:w.note||''}))
+  ].sort((a,b)=>a.date-b.date);
   let cum=0;
-  const data=trades.map(t=>{cum+=t.netPnl;return parseFloat(cum.toFixed(2));});
-  const labels=trades.map(t=>t.date.toLocaleDateString('en-US',{month:'short',day:'numeric'}));
+  const data=events.map(ev=>{cum+=ev.delta;return parseFloat(cum.toFixed(2));});
+  const labels=events.map(ev=>ev.date.toLocaleDateString('en-US',{month:'short',day:'numeric'}));
+  // Mark withdrawal points distinctly
+  const pointBgColors=events.map(ev=>ev.kind==='withdrawal'?'#f59e0b':'#f59e0b');
+  const pointBorderColors=events.map(ev=>ev.kind==='withdrawal'?'#fbbf24':'#d97706');
+  const pointStyles=events.map(ev=>ev.kind==='withdrawal'?'rectRot':'circle');
+  const pointRadiiArr=events.map(ev=>ev.kind==='withdrawal'?6:(events.length>60?0:3));
   // Segment-level coloring: red when both endpoints are negative or below 0, green when positive
   const segColor=(ctx)=>{
     const{p0,p1}=ctx;
@@ -2769,12 +2797,13 @@ function drawEquity(trades){
       data,
       borderColor:'#22c55e',
       borderWidth:2,
-      pointRadius:trades.length>60?0:3,
+      pointRadius:pointRadiiArr,
       pointHitRadius:10,
-      pointBackgroundColor:'#f59e0b',
-      pointBorderColor:'#d97706',
+      pointBackgroundColor:pointBgColors,
+      pointBorderColor:pointBorderColors,
+      pointStyle:pointStyles,
       pointBorderWidth:1.5,
-      pointHoverRadius:6,
+      pointHoverRadius:7,
       pointHoverBackgroundColor:'#fbbf24',
       fill:{target:'origin'},
       backgroundColor:'rgba(34,197,94,0.07)',
@@ -2789,7 +2818,24 @@ function drawEquity(trades){
       onClick:(e)=>{ if(e.native && e.native.detail===2 && charts.eq) charts.eq.resetZoom(); },
       plugins:{
         legend:{display:false},
-        tooltip:{callbacks:{label:c=>fmt(c.raw)}},
+        tooltip:{callbacks:{
+          title:(items)=>{
+            if(!items.length)return'';
+            const ev=events[items[0].dataIndex];
+            const dateStr=ev.date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+            return ev.kind==='withdrawal'?`💸 Payout · ${dateStr}`:dateStr;
+          },
+          label:(c)=>{
+            const ev=events[c.dataIndex];
+            if(ev.kind==='withdrawal'){
+              const lines=[`Equity: ${fmt(c.raw)}`,`Withdrawal: -${fmt(ev.amount).replace('+','')}`];
+              if(ev.accountName)lines.push(`Account: ${ev.accountName}`);
+              if(ev.note)lines.push(`Note: ${ev.note}`);
+              return lines;
+            }
+            return `Equity: ${fmt(c.raw)}`;
+          }
+        }},
         zoom:{
           limits:{ x:{minRange:2} },
           pan:{ enabled:true, mode:'x', modifierKey:null },
@@ -2801,7 +2847,8 @@ function drawEquity(trades){
               const ds=chart.data.datasets[0];
               const {min,max}=chart.scales.x;
               const visible=Math.max(1, max-min);
-              ds.pointRadius = visible<=60 ? 3 : 0;
+              // Recompute point radii: keep withdrawal markers visible at any zoom
+              ds.pointRadius = events.map(ev=>ev.kind==='withdrawal'?6:(visible<=60?3:0));
             },
             onZoomComplete:({chart})=>{ chart.update('none'); }
           }
@@ -3040,6 +3087,10 @@ function renderAnalytics(trades){
   const totalLosersNet=losers.reduce((s,t)=>s+t.netPnl,0);
   const totalNet=totalWinnersNet+totalLosersNet;
   const totalFees=totalWinnersFees+totalLosersFees;
+  // Withdrawals across selected accounts
+  const activeAcctsAna=getActiveAccounts();
+  const totalWdAna=activeAcctsAna.reduce((s,a)=>s+totalWithdrawals(a),0);
+  const netAfterWd=totalNet-totalWdAna;
 
   document.getElementById('analyticsView').innerHTML=`
     <div class="filter-bar"><div class="page-title">Analytics — ${getSelectionLabel()}</div>${renderSelPills()}<div class="spacer"></div><button class="btn btn-ghost" onclick="showImportModal()">↑ Import CSV</button></div>
@@ -3071,12 +3122,14 @@ function renderAnalytics(trades){
       </div>
 
       <!-- NET CARD -->
-      <div style="background:${totalNet>=0?'linear-gradient(135deg,#0c1420,#0a1828)':'linear-gradient(135deg,#1a0c14,#180a18)'};border:1px solid ${totalNet>=0?'#3b82f640':'#ef444440'};border-radius:10px;padding:18px;">
-        <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px;">Net P&amp;L</div>
-        <div style="font-size:30px;font-weight:700;font-family:'DM Mono',monospace;color:${totalNet>=0?'#3b82f6':'#ef4444'};letter-spacing:-.5px;line-height:1;margin-bottom:10px;">${fmtM(totalNet)}</div>
+      <div style="background:${netAfterWd>=0?'linear-gradient(135deg,#0c1420,#0a1828)':'linear-gradient(135deg,#1a0c14,#180a18)'};border:1px solid ${netAfterWd>=0?'#3b82f640':'#ef444440'};border-radius:10px;padding:18px;">
+        <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px;">Net P&amp;L${totalWdAna>0?' (After Payouts)':''}</div>
+        <div style="font-size:30px;font-weight:700;font-family:'DM Mono',monospace;color:${netAfterWd>=0?'#3b82f6':'#ef4444'};letter-spacing:-.5px;line-height:1;margin-bottom:10px;">${fmtM(netAfterWd)}</div>
         <div style="display:flex;flex-direction:column;gap:5px;font-size:11px;">
           <div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Total Trades:</span><span style="font-family:'DM Mono',monospace;color:#c8d4e8;">${trades.length}</span></div>
           <div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Total Fees:</span><span style="font-family:'DM Mono',monospace;color:#f59e0b;">−$${totalFees.toFixed(2)}</span></div>
+          ${totalWdAna>0?`<div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Payouts Taken:</span><span style="font-family:'DM Mono',monospace;color:#f59e0b;">−${fmtM(totalWdAna).replace('+','')}</span></div>
+          <div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Trades-Only Net:</span><span style="font-family:'DM Mono',monospace;color:${totalNet>=0?'#22c55e':'#ef4444'};">${fmtM(totalNet)}</span></div>`:''}
           <div style="display:flex;justify-content:space-between;color:#6b7898;border-top:1px solid #1a1f2e;padding-top:5px;margin-top:3px;"><span>Avg per Trade:</span><span style="font-family:'DM Mono',monospace;color:${totalNet>=0?'#22c55e':'#ef4444'};">${trades.length?fmt(totalNet/trades.length):'–'}</span></div>
         </div>
       </div>
@@ -3375,8 +3428,8 @@ function renderCalendar(preserveScroll=false){
     colPos++;
     if(colPos%7===0||d===daysInMonth){
       if(d===daysInMonth&&colPos%7!==0){const rem=7-(colPos%7);for(let p=0;p<rem;p++)cal+=`<div class="cal-d empty"></div>`;}
-      if(weekHas){const wc=weekPnl>=0?'#22c55e':'#ef4444';const wbg=weekPnl>=0?'rgba(34,197,94,0.07)':'rgba(239,68,68,0.07)';const wLabel=Math.abs(weekPnl)<1000?(weekPnl>=0?'+':'')+weekPnl.toFixed(0):(weekPnl>=0?'+':'-')+(Math.abs(weekPnl)/1000).toFixed(1)+'k';cal+=`<div style="aspect-ratio:1;border-radius:7px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:${wbg};border:1px solid ${wc}30;"><div style="font-size:8px;color:${wc};opacity:.6;margin-bottom:2px;text-transform:uppercase;">Week</div><div style="font-size:11px;font-family:'DM Mono',monospace;font-weight:700;color:${wc};">${wLabel}</div></div>`;}
-      else cal+=`<div style="aspect-ratio:1;border-radius:7px;border:1px solid #1e2535;background:#0a0c11;"></div>`;
+      if(weekHas){const wc=weekPnl>=0?'#22c55e':'#ef4444';const wbg=weekPnl>=0?'rgba(34,197,94,0.07)':'rgba(239,68,68,0.07)';const wLabel=Math.abs(weekPnl)<1000?(weekPnl>=0?'+':'')+weekPnl.toFixed(0):(weekPnl>=0?'+':'-')+(Math.abs(weekPnl)/1000).toFixed(1)+'k';cal+=`<div style="min-height:78px;border-radius:7px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:${wbg};border:1px solid ${wc}30;overflow:hidden;padding:4px 2px;box-sizing:border-box;"><div style="font-size:8px;color:${wc};opacity:.6;margin-bottom:2px;text-transform:uppercase;">Week</div><div style="font-size:11px;font-family:'DM Mono',monospace;font-weight:700;color:${wc};">${wLabel}</div></div>`;}
+      else cal+=`<div style="min-height:78px;border-radius:7px;border:1px solid #1e2535;background:#0a0c11;box-sizing:border-box;"></div>`;
       weekPnl=0;weekHas=false;
     }
   }
@@ -3538,6 +3591,40 @@ function renderCalendar(preserveScroll=false){
     }
   }
 
+  // ── MONTHLY SUMMARY (bottom of calendar) ────────────────────────────────────
+  const monthTrades=trades.filter(t=>t.date.getMonth()===calMonth&&t.date.getFullYear()===calYear);
+  const monthTradesNet=monthTrades.reduce((s,t)=>s+t.netPnl,0);
+  const monthGross=monthTrades.reduce((s,t)=>s+t.pnl,0);
+  const monthFees=monthTrades.reduce((s,t)=>s+t.fees,0);
+  const monthWins=monthTrades.filter(t=>t.netPnl>0).length;
+  const monthLosses=monthTrades.filter(t=>t.netPnl<0).length;
+  const monthWR=monthTrades.length?(monthWins/monthTrades.length*100):0;
+  const monthTradingDays=Object.keys(byDay).filter(k=>{const d=new Date(k);return d.getMonth()===calMonth&&d.getFullYear()===calYear;}).length;
+  // Withdrawals dated in this month for the active accounts in calendar view
+  const calActiveAccts=calAccountFilter==='all'?activeAccounts:activeAccounts.filter(a=>a.id===calAccountFilter);
+  const monthWd=calActiveAccts.flatMap(a=>(a.withdrawals||[])).filter(w=>{const d=new Date(w.date);return d.getMonth()===calMonth&&d.getFullYear()===calYear;}).reduce((s,w)=>s+w.amount,0);
+  const monthNetAfterWd=monthTradesNet-monthWd;
+  const monthColor=monthNetAfterWd>=0?'#22c55e':'#ef4444';
+  const monthBg=monthNetAfterWd>=0?'rgba(34,197,94,0.06)':'rgba(239,68,68,0.06)';
+  const monthSummaryHTML=`
+    <div class="cal-month-summary" style="margin-top:14px;padding-top:14px;border-top:1px solid #1a1f2e;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+      <div style="background:${monthBg};border:1px solid ${monthColor}30;border-radius:8px;padding:12px 14px;">
+        <div style="font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">${monthName.split(' ')[0]} Net P&amp;L${monthWd>0?' (After Payouts)':''}</div>
+        <div style="font-size:22px;font-weight:700;font-family:'DM Mono',monospace;color:${monthColor};letter-spacing:-.5px;line-height:1;">${fmtM(monthNetAfterWd)}</div>
+        ${monthWd>0?`<div style="font-size:10px;color:#6b7898;margin-top:4px;font-family:'DM Mono',monospace;">Trades: <span style="color:${monthTradesNet>=0?'#22c55e':'#ef4444'}">${fmtM(monthTradesNet)}</span> · Payouts: <span style="color:#f59e0b;">−${fmtM(monthWd).replace('+','')}</span></div>`:`<div style="font-size:10px;color:#6b7898;margin-top:4px;">Gross: <span style="font-family:'DM Mono',monospace;color:${monthGross>=0?'#86efac':'#fca5a5'}">${fmtM(monthGross)}</span> · Fees: <span style="font-family:'DM Mono',monospace;color:#f59e0b;">−$${monthFees.toFixed(0)}</span></div>`}
+      </div>
+      <div style="background:#0c1118;border:1px solid #1a1f2e;border-radius:8px;padding:12px 14px;">
+        <div style="font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">Trades</div>
+        <div style="font-size:22px;font-weight:700;font-family:'DM Mono',monospace;color:#c8d4e8;letter-spacing:-.5px;line-height:1;">${monthTrades.length}</div>
+        <div style="font-size:10px;color:#6b7898;margin-top:4px;font-family:'DM Mono',monospace;"><span style="color:#22c55e;">${monthWins}W</span> · <span style="color:#ef4444;">${monthLosses}L</span></div>
+      </div>
+      <div style="background:#0c1118;border:1px solid #1a1f2e;border-radius:8px;padding:12px 14px;">
+        <div style="font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">Trading Days</div>
+        <div style="font-size:22px;font-weight:700;font-family:'DM Mono',monospace;color:#c8d4e8;letter-spacing:-.5px;line-height:1;">${monthTradingDays}</div>
+        <div style="font-size:10px;color:#6b7898;margin-top:4px;font-family:'DM Mono',monospace;">${monthTradingDays?'Avg '+fmtM(monthNetAfterWd/monthTradingDays)+'/day':'–'}</div>
+      </div>
+    </div>`;
+
   document.getElementById('calendarView').innerHTML=`
     <div class="filter-bar">
       <div class="page-title">Calendar</div>
@@ -3553,6 +3640,7 @@ function renderCalendar(preserveScroll=false){
     <div class="chart-card">
       <div style="display:grid;grid-template-columns:repeat(7,1fr) 60px;gap:4px;">${cal}</div>
       <div id="calStreakBar" style="margin-top:14px;padding-top:12px;border-top:1px solid #1a1f2e;"></div>
+      ${monthSummaryHTML}
     </div>
     ${detailHTML}`;
   renderStreakBar(trades,'calStreakBar');
