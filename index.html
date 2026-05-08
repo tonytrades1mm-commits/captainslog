@@ -1948,6 +1948,80 @@ function calcSimpleDD(trades){
   return{maxDD,maxDDPct,curDD,curDDPct,curve};
 }
 
+// ── ZELLA-STYLE TRADER SCORE ──────────────────────────────────────────────────
+// 6 axes, each normalized to 0-100, with composite letter grade.
+// Benchmarks calibrated for futures day trading and prop firm constraints.
+function computeTraderScore(trades){
+  if(!trades||!trades.length){
+    return{
+      raw:{winRate:0,profitFactor:0,avgWinLoss:0,recoveryFactor:0,consistency:0,discipline:0},
+      scores:{winRate:0,profitFactor:0,avgWinLoss:0,recoveryFactor:0,consistency:0,discipline:0},
+      composite:0,grade:'–',sampleSize:0,provisional:true
+    };
+  }
+  const wins=trades.filter(t=>t.netPnl>0);
+  const losses=trades.filter(t=>t.netPnl<0);
+  const grossWins=wins.reduce((s,t)=>s+t.netPnl,0);
+  const grossLosses=Math.abs(losses.reduce((s,t)=>s+t.netPnl,0));
+  const netPnl=trades.reduce((s,t)=>s+t.netPnl,0);
+
+  // RAW METRICS
+  const winRateRaw=trades.length?(wins.length/trades.length)*100:0;
+  const profitFactorRaw=grossLosses>0?grossWins/grossLosses:(grossWins>0?Infinity:0);
+  const avgWin=wins.length?grossWins/wins.length:0;
+  const avgLoss=losses.length?grossLosses/losses.length:0;
+  const avgWinLossRaw=avgLoss>0?avgWin/avgLoss:(avgWin>0?Infinity:0);
+  const{maxDD}=calcSimpleDD(trades);
+  const recoveryFactorRaw=maxDD>0?Math.max(0,netPnl)/maxDD:(netPnl>0?Infinity:0);
+
+  // CONSISTENCY: 1 - (best day's net / total net) — only if profitable
+  // Aggregates by day, compares the single biggest profit day to total net profit
+  let consistencyRaw=0;
+  if(netPnl>0){
+    const byDay={};
+    trades.forEach(t=>{const k=t.date.toDateString();byDay[k]=(byDay[k]||0)+t.netPnl;});
+    const positiveDays=Object.values(byDay).filter(v=>v>0);
+    if(positiveDays.length){
+      const bestDay=Math.max(...positiveDays);
+      const concentration=Math.min(bestDay/netPnl,1);
+      consistencyRaw=Math.max(0,(1-concentration))*100;
+    }
+  }
+
+  // DISCIPLINE: % of trading days that are NOT tilt days
+  const{tiltDays}=detectTiltDays(trades);
+  const allTradingDays=new Set(trades.map(t=>t.date.toDateString()));
+  const totalDays=allTradingDays.size;
+  const tiltDayCount=[...tiltDays].filter(d=>allTradingDays.has(d)).length;
+  const disciplineRaw=totalDays>0?((totalDays-tiltDayCount)/totalDays)*100:100;
+
+  // NORMALIZE TO 0-100 — calibrated for futures day trading benchmarks
+  // Each metric is mapped against good/excellent thresholds; ceiling caps at 100
+  const norm=(v,floor,ceiling)=>Math.max(0,Math.min(100,((v-floor)/(ceiling-floor))*100));
+  const scoreWR=norm(winRateRaw,30,70);                 // 30%→0, 70%→100
+  const scorePF=isFinite(profitFactorRaw)?norm(profitFactorRaw,1.0,3.0):100; // 1.0→0, 3.0→100
+  const scoreAWL=isFinite(avgWinLossRaw)?norm(avgWinLossRaw,0.5,3.0):100;   // 0.5→0, 3.0→100
+  const scoreRF=isFinite(recoveryFactorRaw)?norm(recoveryFactorRaw,1.0,5.0):100; // 1→0, 5→100
+  const scoreCON=norm(consistencyRaw,30,90);             // 30→0, 90→100
+  const scoreDIS=norm(disciplineRaw,60,100);             // 60→0, 100→100
+
+  const composite=(scoreWR+scorePF+scoreAWL+scoreRF+scoreCON+scoreDIS)/6;
+  let grade='F';
+  if(composite>=90)grade='A+';
+  else if(composite>=80)grade='A';
+  else if(composite>=70)grade='B+';
+  else if(composite>=60)grade='B';
+  else if(composite>=50)grade='C+';
+  else if(composite>=40)grade='C';
+  else if(composite>=30)grade='D';
+
+  return{
+    raw:{winRate:winRateRaw,profitFactor:profitFactorRaw,avgWinLoss:avgWinLossRaw,recoveryFactor:recoveryFactorRaw,consistency:consistencyRaw,discipline:disciplineRaw},
+    scores:{winRate:scoreWR,profitFactor:scorePF,avgWinLoss:scoreAWL,recoveryFactor:scoreRF,consistency:scoreCON,discipline:scoreDIS},
+    composite,grade,sampleSize:trades.length,provisional:trades.length<30
+  };
+}
+
 function renderDashboard(trades){
   const wins=trades.filter(t=>t.netPnl>0),losses=trades.filter(t=>t.netPnl<0);
   const totalPnl=trades.reduce((s,t)=>s+t.pnl,0),tradesNetPnl=trades.reduce((s,t)=>s+t.netPnl,0);
@@ -2207,12 +2281,18 @@ function renderDashboard(trades){
     </div>
 
     <div class="g3">
-      <div class="chart-card"><div class="chart-head"><span class="chart-title">Performance</span></div><div>
-        <div class="prog-row"><div class="prog-label">Win Rate</div><div class="prog-track"><div class="prog-fill ${wr>=50?'g':'r'}" style="width:${wr.toFixed(0)}%"></div></div><div class="prog-val">${wr.toFixed(1)}%</div></div>
-        <div class="prog-row"><div class="prog-label">Prof. Factor</div><div class="prog-track"><div class="prog-fill ${pf>=1?'g':'r'}" style="width:${Math.min(pf/3*100,100).toFixed(0)}%"></div></div><div class="prog-val">${pf.toFixed(2)}x</div></div>
-        <div class="prog-row"><div class="prog-label">Avg R:R</div><div class="prog-track"><div class="prog-fill b" style="width:${Math.min((parseFloat(rr)||0)/5*100,100)}%"></div></div><div class="prog-val">${rr}</div></div>
-        <div class="prog-row"><div class="prog-label">Cur. DD</div><div class="prog-track"><div class="prog-fill r" style="width:${Math.min(curDDPct,100).toFixed(0)}%"></div></div><div class="prog-val" style="color:#ef4444;">${curDDPct.toFixed(1)}%</div></div>
-      </div>${renderSelBreakdown()}</div>
+      <div class="chart-card" style="position:relative;">
+        <div class="chart-head" style="margin-bottom:6px;">
+          <span class="chart-title">Trader Score</span>
+          <span class="chip" id="scoreGradeChip" style="font-family:'DM Mono',monospace;font-weight:700;letter-spacing:.5px;font-size:13px;padding:3px 10px;border:1px solid #1e2535;">–</span>
+        </div>
+        <div id="scoreSummary" style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px;">
+          <span id="scoreNumber" style="font-size:32px;font-weight:700;font-family:'DM Mono',monospace;color:#fff;letter-spacing:-1px;line-height:1;">–</span>
+          <span style="font-size:11px;color:#6b7898;">/ 100</span>
+          <span id="scoreSampleNote" style="font-size:10px;color:#6b7898;margin-left:auto;"></span>
+        </div>
+        <div style="position:relative;height:230px;"><canvas id="scoreRadar" role="img" aria-label="Trader score radar"></canvas></div>
+      </div>
       <div class="chart-card"><div class="chart-head"><span class="chart-title">Daily P&amp;L</span></div><div style="position:relative;height:200px;"><canvas id="dayChart" role="img" aria-label="Daily PnL">Daily</canvas></div></div>
     </div>
     <div class="g2">
@@ -2226,7 +2306,49 @@ function renderDashboard(trades){
     </div>`;
   // Flatten withdrawals across selected accounts for equity curve
   const allWithdrawals=activeAcctsForWd.flatMap(a=>(a.withdrawals||[]).map(w=>({...w, accountName:a.name, accountColor:a.color})));
-  setTimeout(()=>{drawEquity(trades,allWithdrawals);drawDaily(trades);drawWL(wins.length,losses.length);drawSymbols(trades);drawHourly(trades);drawTodayIntraday(trades);renderDashCal(trades);renderWeeklySummary(trades);checkGoalAchievements(true);},50);
+
+  // Compute trader score for current month and prior month (for radar comparison)
+  // "Current month" = the calendar month of the most recent trade in selection (falls back to current real month)
+  let scoreYear,scoreMonth;
+  if(trades.length){
+    const lastTrade=trades[trades.length-1];
+    scoreYear=lastTrade.date.getFullYear();
+    scoreMonth=lastTrade.date.getMonth();
+  } else {
+    const now=new Date();scoreYear=now.getFullYear();scoreMonth=now.getMonth();
+  }
+  const curMonthTrades=trades.filter(t=>t.date.getFullYear()===scoreYear&&t.date.getMonth()===scoreMonth);
+  // Prior month
+  let prevYear=scoreYear,prevMonth=scoreMonth-1;
+  if(prevMonth<0){prevMonth=11;prevYear--;}
+  const priorMonthTrades=trades.filter(t=>t.date.getFullYear()===prevYear&&t.date.getMonth()===prevMonth);
+  const curScore=computeTraderScore(curMonthTrades);
+  const priorScore=computeTraderScore(priorMonthTrades);
+
+  setTimeout(()=>{
+    drawEquity(trades,allWithdrawals);drawDaily(trades);drawWL(wins.length,losses.length);drawSymbols(trades);drawHourly(trades);drawTodayIntraday(trades);renderDashCal(trades);renderWeeklySummary(trades);checkGoalAchievements(true);
+    // Trader Score radar + summary
+    const compColor=curScore.composite>=70?'#22c55e':curScore.composite>=50?'#3b82f6':curScore.composite>=30?'#f59e0b':'#ef4444';
+    const scoreNum=document.getElementById('scoreNumber');
+    const scoreGrade=document.getElementById('scoreGradeChip');
+    const scoreNote=document.getElementById('scoreSampleNote');
+    if(scoreNum){
+      scoreNum.textContent=curMonthTrades.length?curScore.composite.toFixed(0):'–';
+      scoreNum.style.color=curMonthTrades.length?compColor:'#6b7898';
+    }
+    if(scoreGrade){
+      scoreGrade.textContent=curMonthTrades.length?curScore.grade:'–';
+      scoreGrade.style.color=curMonthTrades.length?compColor:'#6b7898';
+      scoreGrade.style.borderColor=curMonthTrades.length?compColor+'50':'#1e2535';
+      scoreGrade.style.background=curMonthTrades.length?compColor+'15':'transparent';
+    }
+    if(scoreNote){
+      const monthLabel=new Date(scoreYear,scoreMonth,1).toLocaleDateString('en-US',{month:'short'});
+      const sampleTxt=curScore.provisional&&curMonthTrades.length?`${monthLabel} · ${curMonthTrades.length} trades · provisional`:curMonthTrades.length?`${monthLabel} · ${curMonthTrades.length} trades`:'No trades this month';
+      scoreNote.textContent=sampleTxt;
+    }
+    drawTraderScoreRadar(curScore,priorScore);
+  },50);
 }
 
 function renderSelBreakdown(){
@@ -2865,6 +2987,96 @@ function drawDaily(trades){const c=document.getElementById('dayChart');if(!c)ret
 function drawWL(w,l){const c=document.getElementById('wlChart');if(!c)return;dc('wl');charts.wl=new Chart(c,{type:'doughnut',data:{labels:['Wins','Losses'],datasets:[{data:[w,l],backgroundColor:['#22c55e','#ef4444'],borderColor:'#0c0e14',borderWidth:3}]},options:{responsive:true,maintainAspectRatio:false,cutout:'65%',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.label+': '+c.raw}}}}});}
 function drawSymbols(trades){const el=document.getElementById('symBreak');if(!el)return;const m={};trades.forEach(t=>{if(!m[t.symbol])m[t.symbol]={pnl:0};m[t.symbol].pnl+=t.netPnl;});const sorted=Object.entries(m).sort((a,b)=>Math.abs(b[1].pnl)-Math.abs(a[1].pnl)).slice(0,7);if(!sorted.length)return;const max=Math.max(...sorted.map(s=>Math.abs(s[1].pnl)));el.innerHTML=sorted.map(([sym,d])=>`<div class="prog-row"><div class="prog-label" style="font-family:'DM Mono',monospace;font-size:10px;">${sym}</div><div class="prog-track"><div class="prog-fill ${d.pnl>=0?'g':'r'}" style="width:${(Math.abs(d.pnl)/max*100).toFixed(0)}%"></div></div><div class="prog-val" style="font-size:10px;color:${d.pnl>=0?'#22c55e':'#ef4444'}">${fmtM(d.pnl)}</div></div>`).join('');}
 function drawHourly(trades){const c=document.getElementById('hrChart');if(!c)return;dc('hr');const byHr={};for(let h=8;h<=17;h++)byHr[h]=0;trades.forEach(t=>{const h=t.date.getHours();byHr[h]=(byHr[h]||0)+t.netPnl;});const labels=Object.keys(byHr).map(h=>h+':00');const data=Object.values(byHr).map(v=>parseFloat(v.toFixed(2)));charts.hr=new Chart(c,{type:'bar',data:{labels,datasets:[{data,backgroundColor:data.map(v=>v>=0?'#22c55e':'#ef4444'),borderRadius:2}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmt(c.raw)}}},scales:{x:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9}}},y:{grid:{color:'#141820'},ticks:{color:'#374060',font:{size:9},callback:v=>'$'+v}}}}});}
+
+function drawTraderScoreRadar(currentScore,priorScore){
+  const c=document.getElementById('scoreRadar');if(!c)return;dc('scoreRadar');
+  const labels=['Win Rate','Profit Factor','Avg W/L','Recovery','Consistency','Discipline'];
+  const cur=[
+    currentScore.scores.winRate,
+    currentScore.scores.profitFactor,
+    currentScore.scores.avgWinLoss,
+    currentScore.scores.recoveryFactor,
+    currentScore.scores.consistency,
+    currentScore.scores.discipline
+  ].map(v=>parseFloat(v.toFixed(1)));
+  const datasets=[];
+  // Prior month (faint, dashed) — drawn first so current month sits on top
+  if(priorScore && priorScore.sampleSize>0){
+    const pri=[
+      priorScore.scores.winRate,
+      priorScore.scores.profitFactor,
+      priorScore.scores.avgWinLoss,
+      priorScore.scores.recoveryFactor,
+      priorScore.scores.consistency,
+      priorScore.scores.discipline
+    ].map(v=>parseFloat(v.toFixed(1)));
+    datasets.push({
+      label:'Prior Month',
+      data:pri,
+      borderColor:'#6b7898',
+      backgroundColor:'rgba(107,120,152,0.10)',
+      borderWidth:1.5,
+      borderDash:[4,4],
+      pointRadius:2,
+      pointBackgroundColor:'#6b7898',
+      pointBorderColor:'#6b7898',
+    });
+  }
+  // Current — colored by composite tier
+  const compColor=currentScore.composite>=70?'#22c55e':currentScore.composite>=50?'#3b82f6':currentScore.composite>=30?'#f59e0b':'#ef4444';
+  const compBg=currentScore.composite>=70?'rgba(34,197,94,0.18)':currentScore.composite>=50?'rgba(59,130,246,0.18)':currentScore.composite>=30?'rgba(245,158,11,0.18)':'rgba(239,68,68,0.18)';
+  datasets.push({
+    label:'Current',
+    data:cur,
+    borderColor:compColor,
+    backgroundColor:compBg,
+    borderWidth:2,
+    pointRadius:3.5,
+    pointBackgroundColor:compColor,
+    pointBorderColor:'#0c0e14',
+    pointBorderWidth:1.5,
+    pointHoverRadius:6,
+  });
+  charts.scoreRadar=new Chart(c,{
+    type:'radar',
+    data:{labels,datasets},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{
+        legend:{display:!!priorScore && priorScore.sampleSize>0,position:'bottom',labels:{color:'#8090b0',font:{size:10},boxWidth:12,boxHeight:2,padding:8}},
+        tooltip:{
+          callbacks:{
+            title:(items)=>items.length?items[0].label:'',
+            label:(ctx)=>{
+              const idx=ctx.dataIndex;
+              const isCurrent=ctx.dataset.label==='Current';
+              const src=isCurrent?currentScore:priorScore;
+              if(!src)return '';
+              const rawKeys=['winRate','profitFactor','avgWinLoss','recoveryFactor','consistency','discipline'];
+              const k=rawKeys[idx];
+              const raw=src.raw[k];
+              let rawLabel='';
+              if(k==='winRate'||k==='consistency'||k==='discipline'){rawLabel=raw.toFixed(1)+'%';}
+              else if(k==='profitFactor'){rawLabel=(isFinite(raw)?raw.toFixed(2):'∞')+'x';}
+              else if(k==='avgWinLoss'){rawLabel=(isFinite(raw)?raw.toFixed(2):'∞')+':1';}
+              else if(k==='recoveryFactor'){rawLabel=(isFinite(raw)?raw.toFixed(2):'∞');}
+              return `${ctx.dataset.label}: ${ctx.raw.toFixed(0)}/100 · ${rawLabel}`;
+            }
+          }
+        }
+      },
+      scales:{
+        r:{
+          min:0,max:100,
+          ticks:{display:false,stepSize:25},
+          grid:{color:'#1e2535'},
+          angleLines:{color:'#1e2535'},
+          pointLabels:{color:'#8090b0',font:{size:10,weight:'500'}}
+        }
+      }
+    }
+  });
+}
 
 // ── INTRADAY EQUITY CURVE ─────────────────────────────────────────────────────
 function buildIntradayDatasets(dayTrades, activeAccounts){
