@@ -2280,7 +2280,7 @@ function renderDashboard(trades){
       <div style="position:relative;height:200px;"><canvas id="todayChart" role="img" aria-label="Today intraday PnL">Today's trades</canvas></div>
     </div>
 
-    <div class="g3">
+    <div class="g3" style="grid-template-columns:1fr 2fr;">
       <div class="chart-card" style="position:relative;">
         <div class="chart-head" style="margin-bottom:6px;">
           <span class="chart-title">Trader Score</span>
@@ -2291,7 +2291,7 @@ function renderDashboard(trades){
           <span style="font-size:11px;color:#6b7898;">/ 100</span>
           <span id="scoreSampleNote" style="font-size:10px;color:#6b7898;margin-left:auto;"></span>
         </div>
-        <div style="position:relative;height:230px;"><canvas id="scoreRadar" role="img" aria-label="Trader score radar"></canvas></div>
+        <div style="position:relative;height:200px;"><canvas id="scoreRadar" role="img" aria-label="Trader score radar"></canvas></div>
       </div>
       <div class="chart-card"><div class="chart-head"><span class="chart-title">Daily P&amp;L</span></div><div style="position:relative;height:200px;"><canvas id="dayChart" role="img" aria-label="Daily PnL">Daily</canvas></div></div>
     </div>
@@ -2990,7 +2990,7 @@ function drawHourly(trades){const c=document.getElementById('hrChart');if(!c)ret
 
 function drawTraderScoreRadar(currentScore,priorScore){
   const c=document.getElementById('scoreRadar');if(!c)return;dc('scoreRadar');
-  const labels=['Win Rate','Profit Factor','Avg W/L','Recovery','Consistency','Discipline'];
+  const labels=['Win %','Profit Factor','Avg W/L','Recovery','Consistency','Discipline'];
   const cur=[
     currentScore.scores.winRate,
     currentScore.scores.profitFactor,
@@ -3071,7 +3071,7 @@ function drawTraderScoreRadar(currentScore,priorScore){
           ticks:{display:false,stepSize:25},
           grid:{color:'#1e2535'},
           angleLines:{color:'#1e2535'},
-          pointLabels:{color:'#8090b0',font:{size:10,weight:'500'}}
+          pointLabels:{color:'#8090b0',font:{size:9,weight:'500'}}
         }
       }
     }
