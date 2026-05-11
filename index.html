@@ -698,18 +698,46 @@ function getAuthHeaders(){
   };
 }
 
+// On 401, try refreshing the token once and retrying the request.
+// If that also fails, the session is truly dead — kick to login.
+async function sbFetch(url, opts){
+  await ensureFreshSession();
+  let r = await fetch(url, {...opts, headers:{...getAuthHeaders(), ...(opts.headers||{})}});
+  if(r.status === 401 && authSession?.refresh_token){
+    try {
+      await auth.refreshSession();
+      r = await fetch(url, {...opts, headers:{...getAuthHeaders(), ...(opts.headers||{})}});
+    } catch(e) {
+      // Refresh failed — session is dead, bounce to login
+      handleSessionExpired();
+      throw new Error('Session expired. Please sign in again.');
+    }
+  }
+  return r;
+}
+
+function handleSessionExpired(){
+  localStorage.removeItem('moonshot_session');
+  authSession = null;
+  authUserId = null;
+  const ls = document.getElementById('loginScreen');
+  if(ls) ls.style.display = 'flex';
+  const lo = document.getElementById('logoutBtn');
+  if(lo) lo.style.display = 'none';
+}
+
 const sb={
-  async get(t,q=''){const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}${q}`,{headers:getAuthHeaders()});if(!r.ok)throw new Error(await r.text());return r.json();},
+  async get(t,q=''){const r=await sbFetch(`${SUPABASE_URL}/rest/v1/${t}${q}`,{});if(!r.ok)throw new Error(await r.text());return r.json();},
   async post(t,d){
     // Inject user_id if authenticated and not already present (skips for non-RLS tables)
     if(authUserId){
       if(Array.isArray(d)) d=d.map(row=>row.user_id?row:{...row,user_id:authUserId});
       else if(d && typeof d==='object' && !d.user_id) d={...d,user_id:authUserId};
     }
-    const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}`,{method:'POST',headers:{...getAuthHeaders(),Prefer:'return=minimal'},body:JSON.stringify(d)});if(!r.ok)throw new Error(await r.text());
+    const r=await sbFetch(`${SUPABASE_URL}/rest/v1/${t}`,{method:'POST',headers:{Prefer:'return=minimal'},body:JSON.stringify(d)});if(!r.ok)throw new Error(await r.text());
   },
-  async patch(t,q,d){const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}${q}`,{method:'PATCH',headers:{...getAuthHeaders(),Prefer:'return=minimal'},body:JSON.stringify(d)});if(!r.ok)throw new Error(await r.text());},
-  async del(t,q){const r=await fetch(`${SUPABASE_URL}/rest/v1/${t}${q}`,{method:'DELETE',headers:getAuthHeaders()});if(!r.ok)throw new Error(await r.text());}
+  async patch(t,q,d){const r=await sbFetch(`${SUPABASE_URL}/rest/v1/${t}${q}`,{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify(d)});if(!r.ok)throw new Error(await r.text());},
+  async del(t,q){const r=await sbFetch(`${SUPABASE_URL}/rest/v1/${t}${q}`,{method:'DELETE'});if(!r.ok)throw new Error(await r.text());}
 };
 
 // ── AUTH FUNCTIONS ────────────────────────────────────────────────────────────
@@ -744,17 +772,41 @@ const auth = {
     authSession = null;
     authUserId = null;
   },
+  async refreshSession(){
+    // Use the refresh_token to get a fresh access_token without re-prompting login.
+    // Refresh tokens are long-lived (Supabase default is until explicitly revoked or rotated past inactivity timeout).
+    if(!authSession?.refresh_token) throw new Error('No refresh token');
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method:'POST',
+      headers:{apikey:SUPABASE_KEY,'Content-Type':'application/json'},
+      body:JSON.stringify({refresh_token: authSession.refresh_token})
+    });
+    const data = await r.json();
+    if(!r.ok) throw new Error(data.msg || data.error_description || 'Refresh failed');
+    this.saveSession(data);
+    return data;
+  },
   loadSession(){
+    // Returns:
+    //   'valid'   — access token still good
+    //   'stale'   — access token expired but refresh token present (caller should refresh)
+    //   false     — no session at all
     try{
       const stored = localStorage.getItem('moonshot_session');
       if(stored){
         const s = JSON.parse(stored);
-        // Check if expired
+        authSession = s;
+        authUserId = s.user?.id || null;
         if(s.expires_at && s.expires_at*1000 > Date.now()){
-          authSession = s;
-          authUserId = s.user?.id || null;
-          return true;
+          return 'valid';
         }
+        if(s.refresh_token){
+          return 'stale';
+        }
+        // No way to recover — clear it
+        authSession = null;
+        authUserId = null;
+        localStorage.removeItem('moonshot_session');
       }
     }catch(e){}
     return false;
@@ -765,6 +817,25 @@ const auth = {
     localStorage.setItem('moonshot_session', JSON.stringify(s));
   }
 };
+
+// Refresh the access token if it's expired or expiring within 60 seconds.
+// Call this before any batch of API requests. It's a no-op when the token is fresh.
+let refreshInFlight = null;
+async function ensureFreshSession(){
+  if(!authSession) return false;
+  const expMs = (authSession.expires_at || 0) * 1000;
+  // Refresh if within 60s of expiry (or already expired)
+  if(expMs - Date.now() > 60_000) return true;
+  if(!authSession.refresh_token) return false;
+  // De-dupe concurrent refresh attempts
+  if(!refreshInFlight){
+    refreshInFlight = auth.refreshSession()
+      .catch(e => { console.warn('Session refresh failed:', e); throw e; })
+      .finally(() => { refreshInFlight = null; });
+  }
+  try { await refreshInFlight; return true; }
+  catch(e) { return false; }
+}
 
 let state={accounts:[],groups:[],propFirms:[],commissionRates:[],selectedIds:new Set(),activeGroupId:null,activeTab:'dashboard'};
 let charts={};
@@ -3826,8 +3897,8 @@ function renderCalendar(preserveScroll=false){
         ${monthWd>0?`<div style="font-size:10px;color:#6b7898;margin-top:4px;font-family:'DM Mono',monospace;">Trades: <span style="color:${monthTradesNet>=0?'#22c55e':'#ef4444'}">${fmtM(monthTradesNet)}</span> · Payouts: <span style="color:#f59e0b;">−${fmtM(monthWd).replace('+','')}</span></div>`:`<div style="font-size:10px;color:#6b7898;margin-top:4px;">Gross: <span style="font-family:'DM Mono',monospace;color:${monthGross>=0?'#86efac':'#fca5a5'}">${fmtM(monthGross)}</span> · Fees: <span style="font-family:'DM Mono',monospace;color:#f59e0b;">−$${monthFees.toFixed(0)}</span></div>`}
       </div>
       <div style="background:#0c1118;border:1px solid #1a1f2e;border-radius:8px;padding:12px 14px;">
-        <div style="font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">Trades</div>
-        <div style="font-size:22px;font-weight:700;font-family:'DM Mono',monospace;color:#c8d4e8;letter-spacing:-.5px;line-height:1;">${monthTrades.length}</div>
+        <div style="font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">Win Rate</div>
+        <div style="font-size:22px;font-weight:700;font-family:'DM Mono',monospace;color:${monthTrades.length?(monthWR>=50?'#22c55e':'#ef4444'):'#c8d4e8'};letter-spacing:-.5px;line-height:1;">${monthTrades.length?Math.round(monthWR)+'%':'–'}</div>
         <div style="font-size:10px;color:#6b7898;margin-top:4px;font-family:'DM Mono',monospace;"><span style="color:#22c55e;">${monthWins}W</span> · <span style="color:#ef4444;">${monthLosses}L</span></div>
       </div>
       <div style="background:#0c1118;border:1px solid #1a1f2e;border-radius:8px;padding:12px 14px;">
@@ -4148,14 +4219,34 @@ async function doLogout(){
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
-if(auth.loadSession()){
-  // Have a valid session — load data
-  document.getElementById('logoutBtn').style.display = 'inline-flex';
-  loadData();
-} else {
-  // Show login screen
-  document.getElementById('loginScreen').style.display = 'flex';
-}
+(async function init(){
+  const status = auth.loadSession();
+  if(status === 'valid'){
+    document.getElementById('logoutBtn').style.display = 'inline-flex';
+    loadData();
+  } else if(status === 'stale'){
+    // Token expired but we have a refresh token — refresh silently and continue.
+    try {
+      await auth.refreshSession();
+      document.getElementById('logoutBtn').style.display = 'inline-flex';
+      loadData();
+    } catch(e) {
+      // Refresh token is also dead (revoked, very old, etc.) — show login.
+      handleSessionExpired();
+    }
+  } else {
+    document.getElementById('loginScreen').style.display = 'flex';
+  }
+
+  // Keep the session warm: check every 5 minutes and refresh if expiring soon.
+  // This means an open tab effectively never logs out on its own.
+  setInterval(() => { ensureFreshSession(); }, 5 * 60 * 1000);
+
+  // Also refresh when the tab comes back into focus after being hidden a while.
+  document.addEventListener('visibilitychange', () => {
+    if(!document.hidden) ensureFreshSession();
+  });
+})();
 </script>
 </body>
 </html>
