@@ -2030,14 +2030,17 @@ function computeTraderScore(trades){
       composite:0,grade:'–',sampleSize:0,provisional:true
     };
   }
-  const wins=trades.filter(t=>t.netPnl>0);
-  const losses=trades.filter(t=>t.netPnl<0);
+  // Group fills into logical trades — per-trade stats (win rate, avg win/loss)
+  // are based on logical trades, not exchange fills. Totals (P&L) are unchanged.
+  const logical=groupedTrades(trades);
+  const wins=logical.filter(t=>t.netPnl>0);
+  const losses=logical.filter(t=>t.netPnl<0);
   const grossWins=wins.reduce((s,t)=>s+t.netPnl,0);
   const grossLosses=Math.abs(losses.reduce((s,t)=>s+t.netPnl,0));
   const netPnl=trades.reduce((s,t)=>s+t.netPnl,0);
 
   // RAW METRICS
-  const winRateRaw=trades.length?(wins.length/trades.length)*100:0;
+  const winRateRaw=logical.length?(wins.length/logical.length)*100:0;
   const profitFactorRaw=grossLosses>0?grossWins/grossLosses:(grossWins>0?Infinity:0);
   const avgWin=wins.length?grossWins/wins.length:0;
   const avgLoss=losses.length?grossLosses/losses.length:0;
@@ -2089,22 +2092,26 @@ function computeTraderScore(trades){
   return{
     raw:{winRate:winRateRaw,profitFactor:profitFactorRaw,avgWinLoss:avgWinLossRaw,recoveryFactor:recoveryFactorRaw,consistency:consistencyRaw,discipline:disciplineRaw},
     scores:{winRate:scoreWR,profitFactor:scorePF,avgWinLoss:scoreAWL,recoveryFactor:scoreRF,consistency:scoreCON,discipline:scoreDIS},
-    composite,grade,sampleSize:trades.length,provisional:trades.length<30
+    composite,grade,sampleSize:logical.length,provisional:logical.length<30
   };
 }
 
 function renderDashboard(trades){
-  const wins=trades.filter(t=>t.netPnl>0),losses=trades.filter(t=>t.netPnl<0);
+  // Group fills into logical trades — Tradovate splits one execution into multiple
+  // fills, which inflates trade counts and skews avg/best/worst stats.
+  // Totals (P&L, fees) are identical whether grouped or raw, so we use raw for those.
+  const logical=groupedTrades(trades);
+  const wins=logical.filter(t=>t.netPnl>0),losses=logical.filter(t=>t.netPnl<0);
   const totalPnl=trades.reduce((s,t)=>s+t.pnl,0),tradesNetPnl=trades.reduce((s,t)=>s+t.netPnl,0);
   // Withdrawals across selected accounts — payouts reduce true Net P&L
   const activeAcctsForWd=getActiveAccounts();
   const totalWd=activeAcctsForWd.reduce((s,a)=>s+totalWithdrawals(a),0);
   const netPnl=tradesNetPnl-totalWd;
-  const wr=trades.length?wins.length/trades.length*100:0;
+  const wr=logical.length?wins.length/logical.length*100:0;
   const avgWin=wins.length?wins.reduce((s,t)=>s+t.netPnl,0)/wins.length:0;
   const avgLoss=losses.length?losses.reduce((s,t)=>s+t.netPnl,0)/losses.length:0;
   const pf=losses.length&&avgLoss?Math.abs(wins.reduce((s,t)=>s+t.netPnl,0)/losses.reduce((s,t)=>s+t.netPnl,0)):0;
-  const exp=trades.length?tradesNetPnl/trades.length:0;
+  const exp=logical.length?tradesNetPnl/logical.length:0;
   const maxWin=wins.length?Math.max(...wins.map(t=>t.netPnl)):0;
   const maxLoss=losses.length?Math.min(...losses.map(t=>t.netPnl)):0;
   const fees=trades.reduce((s,t)=>s+t.fees,0);
@@ -2215,11 +2222,12 @@ function renderDashboard(trades){
             ${(()=>{
               const today=new Date().toDateString();
               const todayTrades=getActiveTrades().filter(t=>t.date.toDateString()===today);
+              const todayLogical=groupFills(todayTrades);
               const todayPnl=todayTrades.reduce((s,t)=>s+t.netPnl,0);
               const todayGross=todayTrades.reduce((s,t)=>s+t.pnl,0);
-              const todayWins=todayTrades.filter(t=>t.netPnl>0).length;
-              const todayLosses=todayTrades.filter(t=>t.netPnl<0).length;
-              const todayWR=todayTrades.length?(todayWins/todayTrades.length*100).toFixed(0):0;
+              const todayWins=todayLogical.filter(t=>t.netPnl>0).length;
+              const todayLosses=todayLogical.filter(t=>t.netPnl<0).length;
+              const todayWR=todayLogical.length?(todayWins/todayLogical.length*100).toFixed(0):0;
               const isPos=todayPnl>=0;
               const hasToday=todayTrades.length>0;
               const pnlColor=isPos?'#22c55e':'#ef4444';
@@ -2581,14 +2589,15 @@ function renderWeeklySummary(trades){
   const thisWeekTrades=trades.filter(t=>t.date>=thisWeekStart && t.date<thisWeekEnd);
   const lastWeekTrades=trades.filter(t=>t.date>=lastWeekStart && t.date<lastWeekEnd);
 
-  // Stats helper
+  // Stats helper — uses grouped trades for win/loss/trade count
   const calcStats=(ts)=>{
     if(!ts.length) return{pnl:0,trades:0,wins:0,losses:0,wr:0,bestDay:null,bestDayPnl:0,worstDay:null,worstDayPnl:0,daysTraded:0};
+    const logical=groupFills(ts);
     const pnl=ts.reduce((s,t)=>s+t.netPnl,0);
-    const wins=ts.filter(t=>t.netPnl>0).length;
-    const losses=ts.filter(t=>t.netPnl<0).length;
-    const wr=ts.length?wins/ts.length*100:0;
-    // Group by day to find best/worst
+    const wins=logical.filter(t=>t.netPnl>0).length;
+    const losses=logical.filter(t=>t.netPnl<0).length;
+    const wr=logical.length?wins/logical.length*100:0;
+    // Group by day to find best/worst (uses raw trades — sums are identical)
     const byDay={};
     ts.forEach(t=>{const k=t.date.toDateString();byDay[k]=(byDay[k]||0)+t.netPnl;});
     const dayEntries=Object.entries(byDay);
@@ -2597,7 +2606,7 @@ function renderWeeklySummary(trades){
       if(p>bestDayPnl){bestDayPnl=p;bestDay=d;}
       if(p<worstDayPnl){worstDayPnl=p;worstDay=d;}
     }
-    return{pnl,trades:ts.length,wins,losses,wr,bestDay,bestDayPnl,worstDay,worstDayPnl,daysTraded:dayEntries.length};
+    return{pnl,trades:logical.length,wins,losses,wr,bestDay,bestDayPnl,worstDay,worstDayPnl,daysTraded:dayEntries.length};
   };
 
   const tw=calcStats(thisWeekTrades);
@@ -2691,32 +2700,68 @@ function renderWeeklySummary(trades){
 // A "tilt day" is one where the trader had 3+ consecutive losing TRADES
 // IMPORTANT: Tradovate splits a single trade into multiple fills (e.g. 4 contracts = 2 fills of 2).
 // We group fills with same minute timestamp + same symbol + same side as ONE logical trade.
+// ── FILL GROUPING ─────────────────────────────────────────────────────────────
+// Tradovate splits a single exchange execution into multiple fills (e.g. you exit
+// 4 contracts but it records as 2+2 with the same timestamp and price).
+// We collapse those into ONE logical trade so stats aren't inflated.
+//
+// IMPORTANT for scalers: a scale-out at 10:53:14 @ 20150 and another at 10:55:42
+// @ 20175 stays as 2 trades — different times AND different prices = 2 decisions.
+// Only fills sharing the SAME second + symbol + side + price collapse.
 function groupFills(trades){
+  if(!trades||!trades.length) return [];
   const sorted=[...trades].sort((a,b)=>a.date-b.date);
   const groups=[];
+  const byKey={};
   for(const t of sorted){
-    // Round timestamp to nearest minute for grouping
-    const key=`${Math.floor(t.date.getTime()/60000)}|${t.symbol}|${t.side}`;
-    const existing=groups.find(g=>g.key===key);
-    if(existing){
-      existing.pnl+=t.pnl;
-      existing.netPnl+=t.netPnl;
-      existing.qty+=t.qty;
-      existing.fees+=t.fees;
+    // Second-level precision + exit price (rounded to 4 decimals) as the dedup key.
+    // Falls back to entry price if exit is missing (some CSV formats only have one).
+    const sec=Math.floor(t.date.getTime()/1000);
+    const price=t.exit&&t.exit>0?t.exit:(t.entry||0);
+    const priceKey=Math.round(price*10000);
+    const key=`${sec}|${t.symbol}|${t.side}|${priceKey}|${t.accountId||''}`;
+    if(byKey[key]){
+      const g=byKey[key];
+      g.pnl+=t.pnl;
+      g.netPnl+=t.netPnl;
+      g.qty+=t.qty;
+      g.fees+=t.fees;
+      g._fillCount+=1;
+      g._fillIds.push(t.dbId||t.id);
     } else {
-      groups.push({
+      const g={
         key,
         date:t.date,
         symbol:t.symbol,
         side:t.side,
+        entry:t.entry,
+        exit:t.exit,
         pnl:t.pnl,
         netPnl:t.netPnl,
         qty:t.qty,
-        fees:t.fees
-      });
+        fees:t.fees,
+        accountId:t.accountId,
+        accountName:t.accountName,
+        accountColor:t.accountColor,
+        _fillCount:1,
+        _fillIds:[t.dbId||t.id]
+      };
+      groups.push(g);
+      byKey[key]=g;
     }
   }
   return groups;
+}
+
+// Cached grouping — re-uses result when called repeatedly with the same array.
+// Most render functions call this once per render so caching avoids extra work.
+let _groupCache=new WeakMap();
+function groupedTrades(trades){
+  if(!trades) return [];
+  if(_groupCache.has(trades)) return _groupCache.get(trades);
+  const g=groupFills(trades);
+  _groupCache.set(trades,g);
+  return g;
 }
 
 function detectTiltDays(trades){
@@ -2816,10 +2861,16 @@ function renderDashCal(trades){
   // Build day PnL map
   const byDay={};
   const countByDay={};
+  // Bucket trades by day, then group fills so count reflects logical trades not raw fills
+  const tradesPerDay={};
   trades.forEach(t=>{
     const k=t.date.toDateString();
     byDay[k]=(byDay[k]||0)+t.netPnl;
-    countByDay[k]=(countByDay[k]||0)+1;
+    if(!tradesPerDay[k]) tradesPerDay[k]=[];
+    tradesPerDay[k].push(t);
+  });
+  Object.entries(tradesPerDay).forEach(([k,ts])=>{
+    countByDay[k]=groupFills(ts).length;
   });
 
   // Tilt day detection (3+ consecutive losses on same day)
@@ -2925,14 +2976,15 @@ function renderDashCal(trades){
 
   // Monthly summary row
   const monthTrades=trades.filter(t=>t.date.getMonth()===dashCalMonth&&t.date.getFullYear()===dashCalYear);
+  const monthLogical=groupFills(monthTrades);
   const monthPnl=monthTrades.reduce((s,t)=>s+t.netPnl,0);
-  const monthWins=monthTrades.filter(t=>t.netPnl>0).length;
-  const monthWR=monthTrades.length?(monthWins/monthTrades.length*100).toFixed(0):0;
+  const monthWins=monthLogical.filter(t=>t.netPnl>0).length;
+  const monthWR=monthLogical.length?(monthWins/monthLogical.length*100).toFixed(0):0;
   const tradingDays=Object.keys(byDay).filter(k=>{const d=new Date(k);return d.getMonth()===dashCalMonth&&d.getFullYear()===dashCalYear;}).length;
 
   html+=`<div style="display:flex;gap:16px;margin-top:12px;padding-top:10px;border-top:1px solid #1a1f2e;flex-wrap:wrap;">
     <div style="font-size:11px;color:#4b5a7a;">Month P&amp;L: <span style="font-family:'DM Mono',monospace;font-weight:600;color:${monthPnl>=0?'#22c55e':'#ef4444'}">${fmt(monthPnl)}</span></div>
-    <div style="font-size:11px;color:#4b5a7a;">Trades: <span style="color:#c8d4e8;">${monthTrades.length}</span></div>
+    <div style="font-size:11px;color:#4b5a7a;">Trades: <span style="color:#c8d4e8;">${monthLogical.length}</span></div>
     <div style="font-size:11px;color:#4b5a7a;">Trading Days: <span style="color:#c8d4e8;">${tradingDays}</span></div>
     <div style="font-size:11px;color:#4b5a7a;">Win Rate: <span style="color:${monthWR>=50?'#22c55e':'#ef4444'}">${monthWR}%</span></div>
   </div>`;
@@ -3265,8 +3317,9 @@ function drawTodayIntraday(allTrades){
   const activeAccounts=getActiveAccounts();
   const{datasets,labels,finalPnl,tradeCount,tradeMeta}=buildIntradayDatasets(todayTrades,activeAccounts);
   const acctIds=[...new Set(todayTrades.map(t=>t.accountId))];
-  const wins=todayTrades.filter(t=>t.netPnl>0).length;
-  const losses=todayTrades.filter(t=>t.netPnl<0).length;
+  const todayLogical=groupFills(todayTrades);
+  const wins=todayLogical.filter(t=>t.netPnl>0).length;
+  const losses=todayLogical.filter(t=>t.netPnl<0).length;
 
   // Meta chips with legend
   metaEl.innerHTML=`
@@ -3353,15 +3406,36 @@ function drawIntradayChart(canvasId, dayTrades, activeAccounts){
 function renderAnalytics(trades){
   const{maxDD,maxDDPct,curDD,curDDPct,curve}=calcSimpleDD(trades);
   const DAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-  const dowData=DAYS.map((d,i)=>{const dt=trades.filter(t=>t.date.getDay()===i);const pnl=dt.reduce((s,t)=>s+t.netPnl,0);const wins=dt.filter(t=>t.netPnl>0).length;return{day:d,short:d.slice(0,3),pnl,trades:dt.length,wins,wr:dt.length?wins/dt.length*100:0};}).filter(d=>d.trades>0);
-  const monthMap={};trades.forEach(t=>{const key=`${t.date.getFullYear()}-${String(t.date.getMonth()+1).padStart(2,'0')}`;if(!monthMap[key])monthMap[key]={pnl:0,trades:0,wins:0};monthMap[key].pnl+=t.netPnl;monthMap[key].trades++;if(t.netPnl>0)monthMap[key].wins++;});
+  // Group fills per-day and per-month so trade counts and win counts aren't inflated
+  const dowData=DAYS.map((d,i)=>{
+    const dt=trades.filter(t=>t.date.getDay()===i);
+    const dtLogical=groupFills(dt);
+    const pnl=dt.reduce((s,t)=>s+t.netPnl,0);
+    const wins=dtLogical.filter(t=>t.netPnl>0).length;
+    return{day:d,short:d.slice(0,3),pnl,trades:dtLogical.length,wins,wr:dtLogical.length?wins/dtLogical.length*100:0};
+  }).filter(d=>d.trades>0);
+  const monthMap={};
+  // Bucket trades into months first, then group each month's fills
+  const monthBuckets={};
+  trades.forEach(t=>{
+    const key=`${t.date.getFullYear()}-${String(t.date.getMonth()+1).padStart(2,'0')}`;
+    if(!monthBuckets[key]) monthBuckets[key]=[];
+    monthBuckets[key].push(t);
+  });
+  Object.entries(monthBuckets).forEach(([key,ts])=>{
+    const logical=groupFills(ts);
+    const pnl=ts.reduce((s,t)=>s+t.netPnl,0);
+    const wins=logical.filter(t=>t.netPnl>0).length;
+    monthMap[key]={pnl,trades:logical.length,wins};
+  });
   const months=Object.entries(monthMap).sort((a,b)=>a[0].localeCompare(b[0]));
   const monthNames=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const ddSeries=[];let pk=0;for(const v of curve){if(v>pk)pk=v;ddSeries.push(pk>0?(pk-v)/pk*100:0);}
 
-  // Winners and Losers totals (NET of fees)
-  const winners=trades.filter(t=>t.netPnl>0);
-  const losers=trades.filter(t=>t.netPnl<0);
+  // Winners and Losers totals (NET of fees) — group fills for accurate trade counts
+  const logical=groupedTrades(trades);
+  const winners=logical.filter(t=>t.netPnl>0);
+  const losers=logical.filter(t=>t.netPnl<0);
   const totalWinnersGross=winners.reduce((s,t)=>s+t.pnl,0);
   const totalWinnersFees=winners.reduce((s,t)=>s+t.fees,0);
   const totalWinnersNet=winners.reduce((s,t)=>s+t.netPnl,0);
@@ -3409,11 +3483,11 @@ function renderAnalytics(trades){
         <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px;">Net P&amp;L${totalWdAna>0?' (After Payouts)':''}</div>
         <div style="font-size:30px;font-weight:700;font-family:'DM Mono',monospace;color:${netAfterWd>=0?'#3b82f6':'#ef4444'};letter-spacing:-.5px;line-height:1;margin-bottom:10px;">${fmtM(netAfterWd)}</div>
         <div style="display:flex;flex-direction:column;gap:5px;font-size:11px;">
-          <div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Total Trades:</span><span style="font-family:'DM Mono',monospace;color:#c8d4e8;">${trades.length}</span></div>
+          <div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Total Trades:</span><span style="font-family:'DM Mono',monospace;color:#c8d4e8;">${logical.length}</span></div>
           <div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Total Fees:</span><span style="font-family:'DM Mono',monospace;color:#f59e0b;">−$${totalFees.toFixed(2)}</span></div>
           ${totalWdAna>0?`<div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Payouts Taken:</span><span style="font-family:'DM Mono',monospace;color:#f59e0b;">−${fmtM(totalWdAna).replace('+','')}</span></div>
           <div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Trades-Only Net:</span><span style="font-family:'DM Mono',monospace;color:${totalNet>=0?'#22c55e':'#ef4444'};">${fmtM(totalNet)}</span></div>`:''}
-          <div style="display:flex;justify-content:space-between;color:#6b7898;border-top:1px solid #1a1f2e;padding-top:5px;margin-top:3px;"><span>Avg per Trade:</span><span style="font-family:'DM Mono',monospace;color:${totalNet>=0?'#22c55e':'#ef4444'};">${trades.length?fmt(totalNet/trades.length):'–'}</span></div>
+          <div style="display:flex;justify-content:space-between;color:#6b7898;border-top:1px solid #1a1f2e;padding-top:5px;margin-top:3px;"><span>Avg per Trade:</span><span style="font-family:'DM Mono',monospace;color:${totalNet>=0?'#22c55e':'#ef4444'};">${logical.length?fmt(totalNet/logical.length):'–'}</span></div>
         </div>
       </div>
     </div>
@@ -3443,12 +3517,19 @@ let tradesPage = 1;
 const TRADES_PER_PAGE = 50;
 let tradesAll = [];
 let tradesFilters = {fromDate:'', toDate:'', symbol:''};
+let tradesGrouped = true; // Default to grouped view (matches stats)
 
 function renderTradesView(trades){
   tradesAll = trades;
   tradesPage = 1;
   // Default filter: clear
   tradesFilters = {fromDate:'', toDate:'', symbol:''};
+  drawTradesTable();
+}
+
+function tradesToggleGrouped(){
+  tradesGrouped = !tradesGrouped;
+  tradesPage = 1;
   drawTradesTable();
 }
 
@@ -3503,8 +3584,10 @@ function getFilteredTrades(){
 function drawTradesTable(){
   const showAcct=getActiveAccounts().length>1;
   const filtered = getFilteredTrades();
+  // If grouped mode is on, collapse same-second/same-price fills into one trade
+  const displayTrades = tradesGrouped ? groupFills(filtered) : filtered;
   // Sort by date desc (newest first)
-  const sorted = [...filtered].sort((a,b)=>b.date-a.date);
+  const sorted = [...displayTrades].sort((a,b)=>b.date-a.date);
   const totalPages = Math.max(1, Math.ceil(sorted.length / TRADES_PER_PAGE));
   if(tradesPage > totalPages) tradesPage = totalPages;
 
@@ -3532,7 +3615,10 @@ function drawTradesTable(){
     </div>`;
   };
 
-  const rows = pageTrades.map(t=>`<tr><td>${t.date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'})}</td><td class="sym">${t.symbol}</td>${showAcct?`<td><span class="acct-chip" style="background:${t.accountColor}20;color:${t.accountColor}">${t.accountName}</span></td>`:''}<td><span class="pill ${t.side==='Long'?'pill-l':'pill-s'}">${t.side.toUpperCase()}</span></td><td>${t.qty||1}</td><td>${t.entry?'$'+t.entry.toFixed(2):'–'}</td><td>${t.exit?'$'+t.exit.toFixed(2):'–'}</td><td class="${t.pnl>=0?'tg':'tr2'}">${fmt(t.pnl)}</td><td class="${t.netPnl>=0?'tg':'tr2'}">${fmt(t.netPnl)}</td><td style="color:#374060;">$${t.fees.toFixed(2)}</td></tr>`).join('');
+  const rows = pageTrades.map(t=>{
+    const fillBadge=tradesGrouped&&t._fillCount>1?`<span style="display:inline-block;font-size:9px;color:#6b7898;background:#161b28;padding:1px 5px;border-radius:3px;margin-left:5px;font-family:'DM Mono',monospace;" title="${t._fillCount} exchange fills combined">×${t._fillCount}</span>`:'';
+    return `<tr><td>${t.date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'})}</td><td class="sym">${t.symbol}${fillBadge}</td>${showAcct?`<td><span class="acct-chip" style="background:${t.accountColor}20;color:${t.accountColor}">${t.accountName}</span></td>`:''}<td><span class="pill ${t.side==='Long'?'pill-l':'pill-s'}">${t.side.toUpperCase()}</span></td><td>${t.qty||1}</td><td>${t.entry?'$'+t.entry.toFixed(2):'–'}</td><td>${t.exit?'$'+t.exit.toFixed(2):'–'}</td><td class="${t.pnl>=0?'tg':'tr2'}">${fmt(t.pnl)}</td><td class="${t.netPnl>=0?'tg':'tr2'}">${fmt(t.netPnl)}</td><td style="color:#374060;">$${t.fees.toFixed(2)}</td></tr>`;
+  }).join('');
 
   const hasFilters = tradesFilters.fromDate||tradesFilters.toDate||tradesFilters.symbol;
 
@@ -3571,10 +3657,17 @@ function drawTradesTable(){
 
     <!-- TABLE -->
     <div class="table-card">
-      <div class="table-head">
-        <div class="table-title">All Trades</div>
+      <div class="table-head" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;gap:14px;">
+          <div class="table-title">All Trades</div>
+          <div style="display:inline-flex;background:#0a0c11;border:1px solid #1a1f2e;border-radius:7px;padding:2px;">
+            <button onclick="${tradesGrouped?'':'tradesToggleGrouped()'}" style="padding:4px 11px;border-radius:5px;border:none;background:${tradesGrouped?'#1a2035':'transparent'};color:${tradesGrouped?'#fff':'#6b7898'};font-size:11px;font-family:'DM Sans',sans-serif;font-weight:${tradesGrouped?'500':'400'};cursor:${tradesGrouped?'default':'pointer'};">Grouped</button>
+            <button onclick="${tradesGrouped?'tradesToggleGrouped()':''}" style="padding:4px 11px;border-radius:5px;border:none;background:${!tradesGrouped?'#1a2035':'transparent'};color:${!tradesGrouped?'#fff':'#6b7898'};font-size:11px;font-family:'DM Sans',sans-serif;font-weight:${!tradesGrouped?'500':'400'};cursor:${!tradesGrouped?'default':'pointer'};">Raw Fills</button>
+          </div>
+          <span style="font-size:10px;color:#374060;" title="Grouped: same-second/same-price fills are collapsed (matches dashboard stats). Raw: every exchange fill is its own row.">${tradesGrouped?'Matches stats':'Every fill'}</span>
+        </div>
         <div style="font-size:10px;color:#374060;">
-          ${hasFilters?`${sorted.length} of ${tradesAll.length} trades`:`${sorted.length} total`}
+          ${hasFilters?`${sorted.length} of ${tradesGrouped?groupFills(tradesAll).length:tradesAll.length} trades`:`${sorted.length} total`}
           ${totalPages>1?` · Page ${tradesPage} of ${totalPages}`:''}
         </div>
       </div>
@@ -3688,7 +3781,7 @@ function renderCalendar(preserveScroll=false){
     const dateObj=new Date(calYear,calMonth,d);
     const k=dateObj.toDateString();
     const pnl=byDay[k];
-    const tcount=(tradesByDay[k]||[]).length;
+    const tcount=groupFills(tradesByDay[k]||[]).length;
     const isToday=d===now.getDate()&&calMonth===now.getMonth()&&calYear===now.getFullYear();
     const isSelected=calSelectedDay===k;
     const isTilt=tiltDays.has(k);
@@ -3721,18 +3814,20 @@ function renderCalendar(preserveScroll=false){
   let detailHTML = '';
   if(calSelectedDay){
     const dayTrades = (tradesByDay[calSelectedDay]||[]).sort((a,b)=>a.date-b.date);
+    // Group fills so a single multi-contract execution counts as 1 trade
+    const dayLogical = groupFills(dayTrades);
     const dayGross = dayTrades.reduce((s,t)=>s+t.pnl,0);
     const dayNetPnl = dayTrades.reduce((s,t)=>s+t.netPnl,0);
-    const dayWins = dayTrades.filter(t=>t.netPnl>0);
-    const dayLosses = dayTrades.filter(t=>t.netPnl<0);
-    const dayWR = dayTrades.length?(dayWins.length/dayTrades.length*100).toFixed(0):0;
+    const dayWins = dayLogical.filter(t=>t.netPnl>0);
+    const dayLosses = dayLogical.filter(t=>t.netPnl<0);
+    const dayWR = dayLogical.length?(dayWins.length/dayLogical.length*100).toFixed(0):0;
     const dayAvgWin = dayWins.length?dayWins.reduce((s,t)=>s+t.netPnl,0)/dayWins.length:0;
     const dayAvgLoss = dayLosses.length?dayLosses.reduce((s,t)=>s+t.netPnl,0)/dayLosses.length:0;
     const dayBest = dayWins.length?Math.max(...dayWins.map(t=>t.netPnl)):0;
     const dayWorst = dayLosses.length?Math.min(...dayLosses.map(t=>t.netPnl)):0;
     const dayFees = dayTrades.reduce((s,t)=>s+t.fees,0);
 
-    // Winners/Losers totals for the day (net of fees)
+    // Winners/Losers totals for the day (net of fees) — based on logical trades
     const dayWinnersGross = dayWins.reduce((s,t)=>s+t.pnl,0);
     const dayWinnersFees = dayWins.reduce((s,t)=>s+t.fees,0);
     const dayWinnersNet = dayWins.reduce((s,t)=>s+t.netPnl,0);
@@ -3834,9 +3929,9 @@ function renderCalendar(preserveScroll=false){
           <div style="font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">Net P&amp;L</div>
           <div style="font-size:20px;font-weight:700;font-family:'DM Mono',monospace;color:${dayNetPnl>=0?'#3b82f6':'#ef4444'};letter-spacing:-.5px;line-height:1;margin-bottom:8px;">${fmtM(dayNetPnl)}</div>
           <div style="display:flex;flex-direction:column;gap:3px;font-size:10px;">
-            <div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Total Trades:</span><span style="font-family:'DM Mono',monospace;color:#c8d4e8;">${dayTrades.length}</span></div>
+            <div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Total Trades:</span><span style="font-family:'DM Mono',monospace;color:#c8d4e8;">${dayLogical.length}</span></div>
             <div style="display:flex;justify-content:space-between;color:#6b7898;"><span>Total Fees:</span><span style="font-family:'DM Mono',monospace;color:#f59e0b;">−$${dayFees.toFixed(2)}</span></div>
-            <div style="display:flex;justify-content:space-between;color:#6b7898;border-top:1px solid #1a1f2e;padding-top:3px;margin-top:1px;"><span>Avg/Trade:</span><span style="font-family:'DM Mono',monospace;color:${dayNetPnl>=0?'#22c55e':'#ef4444'};">${fmt(dayNetPnl/dayTrades.length)}</span></div>
+            <div style="display:flex;justify-content:space-between;color:#6b7898;border-top:1px solid #1a1f2e;padding-top:3px;margin-top:1px;"><span>Avg/Trade:</span><span style="font-family:'DM Mono',monospace;color:${dayNetPnl>=0?'#22c55e':'#ef4444'};">${dayLogical.length?fmt(dayNetPnl/dayLogical.length):'–'}</span></div>
           </div>
         </div>
       </div>`:''}
@@ -3876,12 +3971,13 @@ function renderCalendar(preserveScroll=false){
 
   // ── MONTHLY SUMMARY (bottom of calendar) ────────────────────────────────────
   const monthTrades=trades.filter(t=>t.date.getMonth()===calMonth&&t.date.getFullYear()===calYear);
+  const monthLogical=groupFills(monthTrades);
   const monthTradesNet=monthTrades.reduce((s,t)=>s+t.netPnl,0);
   const monthGross=monthTrades.reduce((s,t)=>s+t.pnl,0);
   const monthFees=monthTrades.reduce((s,t)=>s+t.fees,0);
-  const monthWins=monthTrades.filter(t=>t.netPnl>0).length;
-  const monthLosses=monthTrades.filter(t=>t.netPnl<0).length;
-  const monthWR=monthTrades.length?(monthWins/monthTrades.length*100):0;
+  const monthWins=monthLogical.filter(t=>t.netPnl>0).length;
+  const monthLosses=monthLogical.filter(t=>t.netPnl<0).length;
+  const monthWR=monthLogical.length?(monthWins/monthLogical.length*100):0;
   const monthTradingDays=Object.keys(byDay).filter(k=>{const d=new Date(k);return d.getMonth()===calMonth&&d.getFullYear()===calYear;}).length;
   // Withdrawals dated in this month for the active accounts in calendar view
   const calActiveAccts=calAccountFilter==='all'?activeAccounts:activeAccounts.filter(a=>a.id===calAccountFilter);
@@ -3898,7 +3994,7 @@ function renderCalendar(preserveScroll=false){
       </div>
       <div style="background:#0c1118;border:1px solid #1a1f2e;border-radius:8px;padding:12px 14px;">
         <div style="font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">Win Rate</div>
-        <div style="font-size:22px;font-weight:700;font-family:'DM Mono',monospace;color:${monthTrades.length?(monthWR>=50?'#22c55e':'#ef4444'):'#c8d4e8'};letter-spacing:-.5px;line-height:1;">${monthTrades.length?Math.round(monthWR)+'%':'–'}</div>
+        <div style="font-size:22px;font-weight:700;font-family:'DM Mono',monospace;color:${monthLogical.length?(monthWR>=50?'#22c55e':'#ef4444'):'#c8d4e8'};letter-spacing:-.5px;line-height:1;">${monthLogical.length?Math.round(monthWR)+'%':'–'}</div>
         <div style="font-size:10px;color:#6b7898;margin-top:4px;font-family:'DM Mono',monospace;"><span style="color:#22c55e;">${monthWins}W</span> · <span style="color:#ef4444;">${monthLosses}L</span></div>
       </div>
       <div style="background:#0c1118;border:1px solid #1a1f2e;border-radius:8px;padding:12px 14px;">
