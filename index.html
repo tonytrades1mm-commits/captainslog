@@ -1445,6 +1445,42 @@ async function deleteAccount(id){
   catch(e){setSyncStatus('err','Delete failed');toast('Failed: '+e.message,'error');}
 }
 
+// Archive: hides the account everywhere (sidebar, dashboard, charts, groups,
+// totals) but preserves every trade, withdrawal, and prop firm link. Fully
+// reversible via unarchiveAccount. Data is not deleted.
+async function archiveAccount(id){
+  const a=state.accounts.find(x=>x.id===id);
+  if(!a)return;
+  if(!confirm(`Close "${a.name}"?\n\nThis will hide the account and all its trades from your dashboard, but the data will be preserved. You can restore it at any time from the Accounts page by toggling "Show archived".`))return;
+  setSyncStatus('syncing','Archiving...');
+  try{
+    await sb.patch('accounts',`?id=eq.${id}`,{archived:true});
+    a.archived=true;
+    state.selectedIds.delete(id);
+    setSyncStatus('ok','Synced');
+    toast(`"${a.name}" archived`,'success');
+    renderAll();
+  }catch(e){setSyncStatus('err','Archive failed');toast('Failed: '+e.message,'error');}
+}
+
+async function unarchiveAccount(id){
+  const a=state.accounts.find(x=>x.id===id);
+  if(!a)return;
+  setSyncStatus('syncing','Restoring...');
+  try{
+    await sb.patch('accounts',`?id=eq.${id}`,{archived:false});
+    a.archived=false;
+    setSyncStatus('ok','Synced');
+    toast(`"${a.name}" restored`,'success');
+    renderAll();
+  }catch(e){setSyncStatus('err','Restore failed');toast('Failed: '+e.message,'error');}
+}
+
+function toggleShowArchived(){
+  state.showArchived=!state.showArchived;
+  renderContent();
+}
+
 // ── IMPORT ────────────────────────────────────────────────────────────────────
 function showImportModal(){
   if(!state.accounts.length){showAddAccount();return;}
@@ -1768,15 +1804,20 @@ function parseTradovate(text){
 function parseRow(line){const res=[];let cur='',inQ=false;for(let c of line){if(c==='"')inQ=!inQ;else if(c===','&&!inQ){res.push(cur);cur='';}else cur+=c;}res.push(cur);return res;}
 
 // ── SELECTION ─────────────────────────────────────────────────────────────────
-function isAllSelected(){return state.selectedIds.size===0||state.selectedIds.size===state.accounts.length;}
+// Pool of accounts visible in normal app flow — excludes archived. Archived
+// accounts still live in state.accounts so they show up in the Accounts page
+// (under "Show archived"), but everything else (sidebar, dashboard, charts,
+// totals, groups, calendar) treats them as if they don't exist.
+function liveAccounts(){return state.accounts.filter(a=>!a.archived);}
+function isAllSelected(){return state.selectedIds.size===0||state.selectedIds.size===liveAccounts().length;}
 function selectAll(){state.selectedIds.clear();state.activeGroupId=null;renderSidebar();renderContent();}
 function clearSelection(){state.selectedIds.clear();state.activeGroupId=null;renderSidebar();renderContent();}
 function toggleAccount(id,e){e.stopPropagation();state.activeGroupId=null;if(state.selectedIds.has(id))state.selectedIds.delete(id);else state.selectedIds.add(id);renderSidebar();renderContent();}
 function soloAccount(id){state.selectedIds.clear();state.selectedIds.add(id);state.activeGroupId=null;renderSidebar();renderContent();}
 function getActiveTrades(){const active=getActiveAccounts();return active.flatMap(a=>a.trades.map(t=>({...t,accountId:a.id,accountName:a.name,accountColor:a.color})));}
-function getActiveAccounts(){return isAllSelected()?state.accounts:state.accounts.filter(a=>state.selectedIds.has(a.id));}
-function getSelectionLabel(){if(isAllSelected())return`All Accounts <span style="font-size:12px;color:#374060;font-weight:400;">(${state.accounts.length})</span>`;const active=getActiveAccounts();if(active.length===1)return active[0].name;return`<span style="font-size:14px;">${active.length} Accounts</span>`;}
-function renderSelPills(){const active=getActiveAccounts();if(active.length===state.accounts.length||active.length===0)return'';return`<div class="acct-pills">${active.map(a=>`<span class="acct-pill" style="background:${a.color}20;color:${a.color};">${a.name}</span>`).join('')}</div>`;}
+function getActiveAccounts(){return isAllSelected()?liveAccounts():liveAccounts().filter(a=>state.selectedIds.has(a.id));}
+function getSelectionLabel(){if(isAllSelected())return`All Accounts <span style="font-size:12px;color:#374060;font-weight:400;">(${liveAccounts().length})</span>`;const active=getActiveAccounts();if(active.length===1)return active[0].name;return`<span style="font-size:14px;">${active.length} Accounts</span>`;}
+function renderSelPills(){const active=getActiveAccounts();if(active.length===liveAccounts().length||active.length===0)return'';return`<div class="acct-pills">${active.map(a=>`<span class="acct-pill" style="background:${a.color}20;color:${a.color};">${a.name}</span>`).join('')}</div>`;}
 
 // ── NAVIGATION ────────────────────────────────────────────────────────────────
 function setTab(tab,el){
@@ -1793,12 +1834,13 @@ function setTab(tab,el){
 function renderAll(){renderSidebar();renderContent();}
 
 function renderSidebar(){
-  const totalPnl=state.accounts.reduce((s,a)=>s+a.trades.reduce((ss,t)=>ss+t.netPnl,0),0);
-  const totalStartBal=state.accounts.reduce((s,a)=>s+(a.starting_balance||0),0);
+  const live=liveAccounts();
+  const totalPnl=live.reduce((s,a)=>s+a.trades.reduce((ss,t)=>ss+t.netPnl,0),0);
+  const totalStartBal=live.reduce((s,a)=>s+(a.starting_balance||0),0);
   const totalBal=totalStartBal>0?totalStartBal+totalPnl:null;
   const allPnlEl=document.getElementById('allPnl');
   allPnlEl.style.color=totalPnl>0?'#22c55e':totalPnl<0?'#ef4444':'#6b7898';
-  allPnlEl.textContent=totalBal?fmtC(totalBal):state.accounts.length?fmtM(totalPnl):'–';
+  allPnlEl.textContent=totalBal?fmtC(totalBal):live.length?fmtM(totalPnl):'–';
   document.getElementById('allBadge').classList.toggle('active',isAllSelected()&&!state.activeGroupId);
 
   const selBar=document.getElementById('selBar'),selText=document.getElementById('selText');
@@ -1807,15 +1849,15 @@ function renderSidebar(){
     selBar.classList.add('multi');
     selText.innerHTML=`<span style="color:${g?.color||'#3b82f6'}">${g?.name||'Group'}</span>`;
   } else if(isAllSelected()){
-    selBar.classList.remove('multi');selText.textContent=`${state.accounts.length} accounts`;
+    selBar.classList.remove('multi');selText.textContent=`${live.length} accounts`;
   } else {
     selBar.classList.add('multi');selText.innerHTML=`<span class="sel-count">${state.selectedIds.size}</span> selected`;
   }
 
-  // Render groups
+  // Render groups (only count live accounts within each group)
   document.getElementById('groupsList').innerHTML=state.groups.map(g=>{
     const isActive=state.activeGroupId===g.id;
-    const accts=state.accounts.filter(a=>g.account_ids.includes(a.id));
+    const accts=live.filter(a=>g.account_ids.includes(a.id));
     const gPnl=accts.reduce((s,a)=>s+a.trades.reduce((ss,t)=>ss+t.netPnl,0),0);
     return`<div class="group-btn${isActive?' active':''}" onclick="selectGroup('${g.id}')">
       <div class="group-dot" style="background:${g.color};"></div>
@@ -1825,8 +1867,8 @@ function renderSidebar(){
     </div>`;
   }).join('');
 
-  // Render accounts
-  document.getElementById('accountsList').innerHTML=state.accounts.map(a=>{
+  // Render accounts (archived accounts are hidden from sidebar entirely)
+  document.getElementById('accountsList').innerHTML=live.map(a=>{
     const netPnl=a.trades.reduce((s,t)=>s+t.netPnl,0);
     const grossPnl=a.trades.reduce((s,t)=>s+t.pnl,0);
     const checked=!isAllSelected()&&state.selectedIds.has(a.id);
@@ -4028,27 +4070,32 @@ function renderCalendar(preserveScroll=false){
 function renderAccountsView(){
   document.getElementById('emptyState').style.display='none';
   document.getElementById('accountsView').style.display='block';
+  const showArchived=!!state.showArchived;
+  const archivedCount=state.accounts.filter(a=>a.archived).length;
+  const visible=state.accounts.filter(a=>showArchived?a.archived:!a.archived);
   document.getElementById('accountsView').innerHTML=`
-    <div class="filter-bar"><div class="page-title">Manage Accounts</div><div class="spacer"></div>
+    <div class="filter-bar"><div class="page-title">${showArchived?'Archived Accounts':'Manage Accounts'}</div><div class="spacer"></div>
+      ${archivedCount>0?`<button class="btn btn-ghost" onclick="toggleShowArchived()">${showArchived?'← Back to active':`📁 Show archived (${archivedCount})`}</button>`:''}
       <button class="btn btn-ghost" onclick="showPropFirmModal()">🏢 Prop Firms</button>
       <button class="btn btn-primary" onclick="showAddAccount()">+ Add Account</button>
     </div>
-    ${!state.accounts.length?'<div class="empty-state"><div class="empty-icon">🗂</div><div class="empty-title">No accounts yet</div></div>':
-    state.accounts.map(a=>{
+    ${!visible.length?`<div class="empty-state"><div class="empty-icon">${showArchived?'📁':'🗂'}</div><div class="empty-title">${showArchived?'No archived accounts':'No accounts yet'}</div>${showArchived?'<div class="empty-sub">Closed accounts will appear here.</div>':''}</div>`:
+    visible.map(a=>{
       const t=a.trades,netPnl=t.reduce((s,x)=>s+x.netPnl,0),wins=t.filter(x=>x.pnl>0).length;
       const wr=t.length?(wins/t.length*100).toFixed(1):'–';
       const dd=calcTrailingDD(a);
       const isBlown=dd&&dd.blown;
+      const isArchived=!!a.archived;
       const bal=currentBalance(a);
       const wd=totalWithdrawals(a);
       const wdList=(a.withdrawals||[]).sort((x,y)=>y.date-x.date);
       const totalFees=t.reduce((s,x)=>s+(x.fees||0),0);
       const propFirm=state.propFirms.find(p=>p.id===a.prop_firm_id);
-      return`<div class="acct-mgr-row${isBlown?' blown':''}" style="flex-direction:column;align-items:stretch;">
+      return`<div class="acct-mgr-row${isBlown?' blown':''}" style="flex-direction:column;align-items:stretch;${isArchived?'opacity:0.65;':''}">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <div style="width:38px;height:38px;border-radius:9px;background:${a.color}20;color:${a.color};font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${a.name[0].toUpperCase()}</div>
           <div class="acct-mgr-info" style="flex:1;min-width:200px;">
-            <div class="acct-mgr-name">${a.name}${isBlown?'<span style="font-size:10px;background:#2b0808;color:#ef4444;padding:2px 6px;border-radius:4px;font-weight:500;margin-left:6px;">BLOWN</span>':''}${propFirm?`<span style="font-size:10px;background:${propFirm.color}20;color:${propFirm.color};padding:2px 6px;border-radius:4px;font-weight:500;margin-left:6px;">${propFirm.name}</span>`:''}</div>
+            <div class="acct-mgr-name">${a.name}${isArchived?'<span style="font-size:10px;background:#1a1f2e;color:#6b7898;padding:2px 6px;border-radius:4px;font-weight:500;margin-left:6px;border:1px solid #2a3145;">ARCHIVED</span>':''}${isBlown?'<span style="font-size:10px;background:#2b0808;color:#ef4444;padding:2px 6px;border-radius:4px;font-weight:500;margin-left:6px;">BLOWN</span>':''}${propFirm?`<span style="font-size:10px;background:${propFirm.color}20;color:${propFirm.color};padding:2px 6px;border-radius:4px;font-weight:500;margin-left:6px;">${propFirm.name}</span>`:''}</div>
             <div class="acct-mgr-meta">
               ${a.type} · ${t.length} trades · WR: ${wr}${wr!=='–'?'%':''}
               ${bal!==null?` · Balance: <span style="color:#fff;font-family:'DM Mono',monospace;">${fmtC(bal)}</span>`:''}
@@ -4058,12 +4105,16 @@ function renderAccountsView(){
             </div>
           </div>
           <div style="font-family:'DM Mono',monospace;font-size:13px;font-weight:500;color:${netPnl>=0?'#22c55e':'#ef4444'};margin-right:8px;">${fmtM(netPnl)}</div>
-          <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;" onclick="soloAccount('${a.id}');setTab('dashboard',document.querySelectorAll('.nav-tab')[0])">View</button>
-          <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="showEditDD('${a.id}')">DD Settings</button>
-          <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="showEditGoal('${a.id}')">🎯 Goal</button>
-          <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;color:#f59e0b;border-color:#f59e0b40;" onclick="showWithdrawalModal('${a.id}')">💸 Payout</button>
-          <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="showImportForAcct('${a.id}')">↑ Import</button>
-          <button class="btn btn-danger" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="deleteAccount('${a.id}')">Delete</button>
+          ${isArchived
+            ?`<button class="btn btn-primary" style="font-size:11px;padding:5px 10px;" onclick="unarchiveAccount('${a.id}')">↻ Restore</button>
+              <button class="btn btn-danger" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="deleteAccount('${a.id}')">Delete Permanently</button>`
+            :`<button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;" onclick="soloAccount('${a.id}');setTab('dashboard',document.querySelectorAll('.nav-tab')[0])">View</button>
+              <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="showEditDD('${a.id}')">DD Settings</button>
+              <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="showEditGoal('${a.id}')">🎯 Goal</button>
+              <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;color:#f59e0b;border-color:#f59e0b40;" onclick="showWithdrawalModal('${a.id}')">💸 Payout</button>
+              <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="showImportForAcct('${a.id}')">↑ Import</button>
+              <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;color:#9ba8c4;border-color:#3a4566;" onclick="archiveAccount('${a.id}')" title="Close this account — hides it but keeps all data. Reversible.">🗄 Close</button>
+              <button class="btn btn-danger" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="deleteAccount('${a.id}')">Delete</button>`}
         </div>
         <!-- Prop firm selector -->
         <div style="margin-top:8px;display:flex;align-items:center;gap:8px;">
