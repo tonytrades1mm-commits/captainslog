@@ -605,6 +605,7 @@ input[type=file]{display:none;}
 
       <div class="modal-label">Commission Rates per Symbol</div>
       <div style="font-size:11px;color:#6b7898;margin-bottom:8px;">Round-trip rate per contract. Use <code style="background:#161b28;padding:1px 5px;border-radius:3px;color:#c8d4e8;">default</code> as fallback. Symbol prefixes work (e.g. NQ matches NQH6, NQM6).</div>
+      <div id="pfAuditCallout" style="display:none;"></div>
       <div id="pfRatesList" style="margin-bottom:10px;"></div>
       <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;" onclick="addRateRow()">＋ Add Rate</button>
 
@@ -1239,22 +1240,100 @@ function showPropFirmModal(){
   openModal('propFirmModal');
 }
 
+// Audit a single prop firm's commission setup. Returns:
+//  - covered: symbols this firm has explicit rates for (uppercase, dedup, no default)
+//  - hasDefault: true if a 'default' or '*' fallback rate exists
+//  - hasZeroRate: true if any rate is $0 (probably a setup mistake)
+//  - tradedSymbols: distinct symbols actually traded on this firm's accounts
+//  - missing: traded symbols that wouldn't match any rate (and no default)
+function auditPropFirmCoverage(p){
+  const rates=state.commissionRates.filter(r=>r.prop_firm_id===p.id);
+  const ratePatterns=rates.map(r=>r.symbol_pattern.toUpperCase());
+  const hasDefault=ratePatterns.some(s=>s==='DEFAULT'||s==='*');
+  const hasZeroRate=rates.some(r=>!r.rate_per_contract||r.rate_per_contract===0);
+  const explicit=ratePatterns.filter(s=>s!=='DEFAULT'&&s!=='*');
+  // Find symbols actually traded on accounts using this firm
+  const acctIds=state.accounts.filter(a=>a.prop_firm_id===p.id).map(a=>a.id);
+  const symCounts={};
+  state.accounts.filter(a=>acctIds.includes(a.id)).forEach(a=>{
+    a.trades.forEach(t=>{
+      const s=(t.symbol||'').toUpperCase();
+      if(s)symCounts[s]=(symCounts[s]||0)+1;
+    });
+  });
+  const tradedSymbols=Object.keys(symCounts);
+  // For each traded symbol, check if it would match (exact, prefix, or default)
+  const sortedExplicit=[...explicit].sort((a,b)=>b.length-a.length);
+  const missing=tradedSymbols.filter(sym=>{
+    if(explicit.includes(sym))return false;
+    if(sortedExplicit.some(pat=>sym.startsWith(pat)))return false;
+    return !hasDefault;
+  });
+  return{rateCount:rates.length,explicit,hasDefault,hasZeroRate,tradedSymbols,missing,symCounts};
+}
+
 function renderPropFirmList(){
   const list=document.getElementById('propFirmList');
   if(!state.propFirms.length){
     list.innerHTML=`<div style="color:#4b5a7a;font-size:12px;text-align:center;padding:18px;background:#0c0e14;border-radius:8px;border:1px dashed #1e2535;">No prop firms yet. Add one to start tracking commissions.</div>`;
     return;
   }
-  list.innerHTML=state.propFirms.map(p=>{
-    const rates=state.commissionRates.filter(r=>r.prop_firm_id===p.id);
+  // Build audit for every firm so we can show a summary at top
+  const audits=state.propFirms.map(p=>({p,audit:auditPropFirmCoverage(p)}));
+  const problems=audits.filter(({p,audit})=>{
     const acctCount=state.accounts.filter(a=>a.prop_firm_id===p.id).length;
-    return`<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#161b28;border-radius:8px;margin-bottom:6px;cursor:pointer;border:1px solid transparent;" onclick="editPropFirm('${p.id}')" onmouseover="this.style.borderColor='#2a3558'" onmouseout="this.style.borderColor='transparent'">
-      <div style="width:10px;height:10px;border-radius:50%;background:${p.color};flex-shrink:0;"></div>
-      <div style="flex:1;min-width:0;">
-        <div style="font-size:12px;color:#c8d4e8;font-weight:500;">${p.name}</div>
-        <div style="font-size:10px;color:#6b7898;margin-top:2px;">${rates.length} rate${rates.length!==1?'s':''} · ${acctCount} account${acctCount!==1?'s':''}</div>
+    // Only flag firms that are actually in use (have accounts attached)
+    if(acctCount===0)return false;
+    return audit.rateCount===0||audit.missing.length>0||audit.hasZeroRate;
+  });
+  const allGood=problems.length===0;
+  // Summary banner
+  const banner=allGood
+    ? `<div style="padding:10px 12px;background:#0a1f0f;border:1px solid #22c55e30;border-radius:8px;margin-bottom:12px;font-size:12px;color:#22c55e;display:flex;align-items:center;gap:8px;">
+         <span style="font-size:14px;">✓</span>
+         <div><strong>All set.</strong> <span style="color:#7fb88f;">Every active prop firm has commission coverage for the symbols you trade.</span></div>
+       </div>`
+    : `<div style="padding:10px 12px;background:#1f1208;border:1px solid #f59e0b40;border-radius:8px;margin-bottom:12px;font-size:12px;color:#f59e0b;">
+         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span style="font-size:14px;">⚠</span><strong>${problems.length} prop firm${problems.length>1?'s need':' needs'} attention</strong></div>
+         <div style="color:#c8a35c;font-size:11px;margin-left:22px;">Click any flagged firm below to fix its commission rates.</div>
+       </div>`;
+  list.innerHTML=banner+audits.map(({p,audit})=>{
+    const acctCount=state.accounts.filter(a=>a.prop_firm_id===p.id).length;
+    const inUse=acctCount>0;
+    // Status decision tree
+    let statusBadge,statusColor,statusDetail;
+    if(!inUse){
+      statusBadge='—';statusColor='#6b7898';
+      statusDetail=`${audit.rateCount} rate${audit.rateCount!==1?'s':''} · Not attached to any account`;
+    } else if(audit.rateCount===0){
+      statusBadge='⚠ No rates';statusColor='#ef4444';
+      statusDetail=`${acctCount} account${acctCount!==1?'s':''} attached but 0 commission rates configured — fees will be $0`;
+    } else if(audit.missing.length>0){
+      statusBadge=`⚠ ${audit.missing.length} symbol${audit.missing.length>1?'s':''} uncovered`;statusColor='#f59e0b';
+      statusDetail=`Missing rates for: <span style="color:#fff;font-family:'DM Mono',monospace;">${audit.missing.slice(0,5).join(', ')}${audit.missing.length>5?` +${audit.missing.length-5} more`:''}</span>`;
+    } else if(audit.hasZeroRate){
+      statusBadge='⚠ $0 rate';statusColor='#f59e0b';
+      statusDetail=`${audit.rateCount} rate${audit.rateCount!==1?'s':''} configured, but one or more is set to $0`;
+    } else if(audit.hasDefault){
+      statusBadge='✓ Complete';statusColor='#22c55e';
+      statusDetail=`${audit.rateCount} rates · ${audit.tradedSymbols.length} traded symbol${audit.tradedSymbols.length!==1?'s':''} covered · default fallback set`;
+    } else {
+      statusBadge='✓ Covered';statusColor='#22c55e';
+      statusDetail=`${audit.rateCount} rates · ${audit.tradedSymbols.length} traded symbol${audit.tradedSymbols.length!==1?'s':''} covered`;
+    }
+    return`<div style="padding:10px 12px;background:#161b28;border-radius:8px;margin-bottom:6px;cursor:pointer;border:1px solid transparent;" onclick="editPropFirm('${p.id}')" onmouseover="this.style.borderColor='#2a3558'" onmouseout="this.style.borderColor='transparent'">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:10px;height:10px;border-radius:50%;background:${p.color};flex-shrink:0;"></div>
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <div style="font-size:12px;color:#c8d4e8;font-weight:500;">${p.name}</div>
+            <span style="font-size:10px;color:${statusColor};background:${statusColor}15;padding:2px 6px;border-radius:4px;font-weight:500;">${statusBadge}</span>
+            ${acctCount>0?`<span style="font-size:10px;color:#6b7898;">${acctCount} account${acctCount!==1?'s':''}</span>`:''}
+          </div>
+          <div style="font-size:10px;color:#6b7898;margin-top:3px;line-height:1.4;">${statusDetail}</div>
+        </div>
+        <span style="color:#6b7898;font-size:11px;">✎</span>
       </div>
-      <span style="color:#6b7898;font-size:11px;">✎</span>
     </div>`;
   }).join('');
 }
@@ -1266,6 +1345,8 @@ function newPropFirm(){
   pfSelectedColor=PF_COLORS[0];
   renderPfColorSwatches();
   renderPfRatesList([]);
+  const callout=document.getElementById('pfAuditCallout');
+  if(callout){callout.style.display='none';callout.innerHTML='';}
   document.getElementById('pfDeleteBtn').style.display='none';
   document.getElementById('propFirmEditPanel').style.display='block';
 }
@@ -1279,8 +1360,44 @@ function editPropFirm(id){
   renderPfColorSwatches();
   const rates=state.commissionRates.filter(r=>r.prop_firm_id===id);
   renderPfRatesList(rates);
+  // Show audit callout above the rates list if anything's wrong
+  const audit=auditPropFirmCoverage(p);
+  const callout=document.getElementById('pfAuditCallout');
+  if(audit.missing.length>0){
+    const symList=audit.missing.map(s=>`<code style="background:#1f1208;color:#f59e0b;padding:1px 6px;border-radius:3px;font-size:10px;margin-right:4px;">${s} (${audit.symCounts[s]})</code>`).join('');
+    callout.innerHTML=`<div style="padding:9px 11px;background:#1f1208;border:1px solid #f59e0b40;border-radius:7px;margin-bottom:10px;font-size:11px;">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px;"><span style="color:#f59e0b;font-size:13px;">⚠</span><span style="color:#f59e0b;font-weight:500;">${audit.missing.length} traded symbol${audit.missing.length>1?'s have':' has'} no commission rate</span></div>
+      <div style="margin-bottom:6px;">${symList}</div>
+      <button class="btn btn-ghost" style="font-size:10px;padding:4px 8px;" onclick="addMissingRateRows(${JSON.stringify(audit.missing).replace(/"/g,'&quot;')})">＋ Add empty rows for these</button>
+      ${!audit.hasDefault?'<span style="font-size:10px;color:#c8a35c;margin-left:8px;">Tip: add a <code style="background:#161b28;padding:1px 4px;border-radius:3px;color:#c8d4e8;">default</code> rule as a catch-all.</span>':''}
+    </div>`;
+    callout.style.display='block';
+  } else if(audit.rateCount===0){
+    callout.innerHTML=`<div style="padding:9px 11px;background:#2b0808;border:1px solid #ef444440;border-radius:7px;margin-bottom:10px;font-size:11px;color:#ef4444;">
+      <span style="font-size:13px;">⚠</span> No commission rates set. Every trade on this firm's accounts will have $0 fees.
+    </div>`;
+    callout.style.display='block';
+  } else if(audit.hasZeroRate){
+    callout.innerHTML=`<div style="padding:9px 11px;background:#1f1208;border:1px solid #f59e0b40;border-radius:7px;margin-bottom:10px;font-size:11px;color:#f59e0b;">
+      <span style="font-size:13px;">⚠</span> One or more rates is set to $0. Double-check the values below.
+    </div>`;
+    callout.style.display='block';
+  } else {
+    callout.style.display='none';
+    callout.innerHTML='';
+  }
   document.getElementById('pfDeleteBtn').style.display='inline-flex';
   document.getElementById('propFirmEditPanel').style.display='block';
+}
+
+// Append empty rate rows for each missing symbol, so the user can just fill in dollar amounts.
+function addMissingRateRows(symbols){
+  symbols.forEach(s=>{
+    document.getElementById('pfRatesList').insertAdjacentHTML('beforeend', renderRateRow(s, '', Date.now()+Math.random()));
+  });
+  // Hide the callout now that rows are added — they'll save when the user clicks Save
+  const callout=document.getElementById('pfAuditCallout');
+  if(callout){callout.style.display='none';callout.innerHTML='';}
 }
 
 function renderPfColorSwatches(){
@@ -2385,9 +2502,39 @@ function renderDashboard(trades){
       <div class="stat-card"><div class="stat-label">Net P&amp;L</div><div class="stat-val ${netPnl>=0?'g':'r'}">${fmtM(netPnl)}</div><div class="stat-sub">${totalWd>0?`After ${fmtM(totalWd)} payouts · Trades: ${fmtM(tradesNetPnl)}`:`Gross: ${fmtM(totalPnl)}`}</div></div>
       <div class="stat-card"><div class="stat-label">Win Rate</div><div class="stat-val ${wr>=50?'g':'r'}">${wr.toFixed(1)}%</div><div class="stat-sub">${wins.length}W / ${losses.length}L</div></div>
       <div class="stat-card"><div class="stat-label">Profit Factor</div><div class="stat-val ${pf>=1.5?'g':pf>=1?'b':'r'}">${pf.toFixed(2)}x</div><div class="stat-sub">${pf>=1.5?'Excellent':pf>=1?'Good':'Below 1'}</div></div>
-      <div class="stat-card"><div class="stat-label">Avg Win</div><div class="stat-val g">${fmt(avgWin)}</div><div class="stat-sub">Per winning trade</div></div>
-      <div class="stat-card"><div class="stat-label">Avg Loss</div><div class="stat-val r">${fmt(avgLoss)}</div><div class="stat-sub">Per losing trade</div></div>
-      <div class="stat-card"><div class="stat-label">Avg R:R</div><div class="stat-val b">${rr}</div><div class="stat-sub">Risk/Reward ratio</div></div>
+      <div class="stat-card" style="grid-column:span 2;">
+        <div class="stat-label">Avg Win vs Loss</div>
+        ${(()=>{
+          const absLoss=Math.abs(avgLoss);
+          const maxSide=Math.max(avgWin,absLoss);
+          const winPct=maxSide>0?(avgWin/maxSide)*100:0;
+          const lossPct=maxSide>0?(absLoss/maxSide)*100:0;
+          const ratio=absLoss>0?(avgWin/absLoss):(avgWin>0?Infinity:0);
+          const ratioColor=ratio>=2?'#22c55e':ratio>=1?'#3b82f6':'#ef4444';
+          return`
+          <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-size:9px;color:#22c55e;font-weight:600;width:28px;letter-spacing:.5px;">WIN</span>
+              <div style="flex:1;height:10px;background:#0a0d14;border-radius:3px;overflow:hidden;">
+                <div style="height:100%;width:${winPct}%;background:linear-gradient(90deg,#16a34a,#22c55e);border-radius:3px;transition:width .3s;"></div>
+              </div>
+              <span style="font-size:12px;color:#22c55e;font-family:'DM Mono',monospace;font-weight:600;min-width:58px;text-align:right;">${fmt(avgWin)}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-size:9px;color:#ef4444;font-weight:600;width:28px;letter-spacing:.5px;">LOSS</span>
+              <div style="flex:1;height:10px;background:#0a0d14;border-radius:3px;overflow:hidden;">
+                <div style="height:100%;width:${lossPct}%;background:linear-gradient(90deg,#dc2626,#ef4444);border-radius:3px;transition:width .3s;"></div>
+              </div>
+              <span style="font-size:12px;color:#ef4444;font-family:'DM Mono',monospace;font-weight:600;min-width:58px;text-align:right;">${fmt(avgLoss)}</span>
+            </div>
+          </div>
+          <div class="stat-sub" style="display:flex;align-items:center;gap:6px;margin-top:8px;">
+            <span style="color:${ratioColor};font-family:'DM Mono',monospace;font-weight:600;">${isFinite(ratio)?ratio.toFixed(2):'∞'}:1</span>
+            <span style="color:#374060;">·</span>
+            <span>${ratio>=2?'Strong edge':ratio>=1?'Wins bigger than losses':ratio>0?'Losses bigger than wins':'No wins yet'}</span>
+          </div>`;
+        })()}
+      </div>
       <div class="stat-card"><div class="stat-label">Best Trade</div><div class="stat-val g">${fmt(maxWin)}</div><div class="stat-sub">Single trade max</div></div>
       <div class="stat-card"><div class="stat-label">Worst Trade</div><div class="stat-val r">${fmt(maxLoss)}</div><div class="stat-sub">Single trade max</div></div>
     </div>
