@@ -972,7 +972,34 @@ async function loadData(){
   }catch(e){setSyncStatus('err','Connection error');document.getElementById('emptyTitle').textContent='Could not connect';document.getElementById('emptySub').textContent='Check your internet connection.';toast('Failed to connect','error');}
 }
 
-// Calculate commission for a trade based on symbol + qty + prop firm rates
+// Sync recalculated fees back to Supabase trades table.
+// applyCommissionRates() already runs on every load and keeps in-memory values
+// correct, but the DB rows retain whatever fees were stored at import time.
+// This function writes the current in-memory fees/netPnl back so the DB matches.
+async function syncFeesToDB(){
+  const affected=[];
+  state.accounts.forEach(a=>{
+    if(!a.prop_firm_id)return;
+    a.trades.forEach(t=>{
+      if(t.dbId)affected.push({dbId:t.dbId,fees:t.fees,net_pnl:t.netPnl});
+    });
+  });
+  if(!affected.length){toast('No prop-firm trades to sync','info');return;}
+  if(!confirm(`Sync fees for ${affected.length} trade${affected.length!==1?'s':''}?\n\nThis will write the journal's calculated commission values back to your database so both match.`))return;
+  setSyncStatus('syncing','Syncing fees...');
+  try{
+    // Batch in chunks of 50 to avoid hitting URL length limits on the PATCH
+    const CHUNK=50;
+    for(let i=0;i<affected.length;i+=CHUNK){
+      const chunk=affected.slice(i,i+CHUNK);
+      await Promise.all(chunk.map(t=>
+        sb.patch('trades',`?id=eq.${t.dbId}`,{fees:t.fees,net_pnl:t.net_pnl})
+      ));
+    }
+    setSyncStatus('ok','Synced');
+    toast(`Fees synced for ${affected.length} trades ✓`,'success');
+  }catch(e){setSyncStatus('err','Sync failed');toast('Sync failed: '+e.message,'error');}
+}
 function calcCommission(trade, acctPropFirmId){
   if(!acctPropFirmId) return null; // no prop firm assigned, leave fees alone
   const rates=state.commissionRates.filter(r=>r.prop_firm_id===acctPropFirmId);
@@ -4154,6 +4181,62 @@ function renderCalendar(preserveScroll=false){
             </div>
             <div class="day-trade-pnl" style="color:${t.netPnl>=0?'#22c55e':'#ef4444'}">${fmt(t.netPnl)}</div>
           </div>`).join('')}
+        ${(()=>{
+          // Fee audit — only show if at least one trade has a fee > 0 (i.e. prop firm rates are set)
+          const tradesWithFees=dayTrades.filter(t=>t.fees>0);
+          if(!tradesWithFees.length) return '';
+          const totalFees=dayTrades.reduce((s,t)=>s+(t.fees||0),0);
+          const totalGross=dayTrades.reduce((s,t)=>s+t.pnl,0);
+          // Build per-symbol fee summary for quick rate identification
+          const bySymbol={};
+          dayTrades.forEach(t=>{
+            const s=t.symbol||'?';
+            if(!bySymbol[s])bySymbol[s]={qty:0,fees:0,trades:0};
+            bySymbol[s].qty+=t.qty||0;
+            bySymbol[s].fees+=(t.fees||0);
+            bySymbol[s].trades++;
+          });
+          const symRows=Object.entries(bySymbol).filter(([,v])=>v.fees>0).map(([sym,v])=>{
+            const ratePerContract=v.qty>0?(v.fees/v.qty):0;
+            return`<tr>
+              <td style="padding:4px 8px;color:#c8d4e8;font-family:'DM Mono',monospace;font-size:10px;">${sym}</td>
+              <td style="padding:4px 8px;color:#6b7898;font-size:10px;text-align:center;">${v.trades} trade${v.trades!==1?'s':''}</td>
+              <td style="padding:4px 8px;color:#6b7898;font-size:10px;text-align:center;">${v.qty} ct total</td>
+              <td style="padding:4px 8px;color:#9ba8c4;font-family:'DM Mono',monospace;font-size:10px;text-align:right;">$${ratePerContract.toFixed(2)}/ct</td>
+              <td style="padding:4px 8px;color:#ef8444;font-family:'DM Mono',monospace;font-size:10px;text-align:right;">-$${v.fees.toFixed(2)}</td>
+            </tr>`;
+          }).join('');
+          return`<details style="margin-top:10px;" ontoggle="var a=this.querySelector('#feeAuditArrow');if(a)a.textContent=this.open?'▼':'▶';">
+            <summary style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;cursor:pointer;user-select:none;list-style:none;display:flex;align-items:center;gap:6px;padding:6px 0;" onmouseover="this.style.color='#6b7898'" onmouseout="this.style.color='#374060'">
+              <span id="feeAuditArrow">▶</span> Fee Audit
+              <span style="font-family:'DM Mono',monospace;color:#ef8444;font-weight:500;margin-left:4px;">-$${totalFees.toFixed(2)}</span>
+              <span style="color:#374060;font-weight:400;">of $${totalGross.toFixed(2)} gross</span>
+            </summary>
+            <div style="background:#0a0d14;border:1px solid #1a1f2e;border-radius:8px;overflow:hidden;margin-top:6px;">
+              <table style="width:100%;border-collapse:collapse;">
+                <thead>
+                  <tr style="border-bottom:1px solid #1a1f2e;">
+                    <th style="padding:5px 8px;font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.5px;text-align:left;font-weight:500;">Symbol</th>
+                    <th style="padding:5px 8px;font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.5px;text-align:center;font-weight:500;">Trades</th>
+                    <th style="padding:5px 8px;font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.5px;text-align:center;font-weight:500;">Contracts</th>
+                    <th style="padding:5px 8px;font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.5px;text-align:right;font-weight:500;">Rate/ct</th>
+                    <th style="padding:5px 8px;font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:.5px;text-align:right;font-weight:500;">Total Fees</th>
+                  </tr>
+                </thead>
+                <tbody>${symRows}</tbody>
+                <tfoot>
+                  <tr style="border-top:1px solid #1a1f2e;">
+                    <td colspan="4" style="padding:5px 8px;font-size:10px;color:#6b7898;font-weight:500;">Total fees today</td>
+                    <td style="padding:5px 8px;font-family:'DM Mono',monospace;font-size:11px;color:#ef8444;font-weight:600;text-align:right;">-$${totalFees.toFixed(2)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+              <div style="padding:6px 8px;border-top:1px solid #1a1f2e;font-size:10px;color:#374060;">
+                💡 If a symbol's Rate/ct is wrong, fix it in <span style="color:#3b82f6;cursor:pointer;text-decoration:underline;" onclick="showPropFirmModal()">Prop Firms → commission rates</span>.
+              </div>
+            </div>
+          </details>`;
+        })()}
       `:`<div style="color:#4b5a7a;font-size:12px;text-align:center;padding:16px;">No trades on this day</div>`}
     </div>`;
     if(dayTrades.length){
@@ -4227,6 +4310,7 @@ function renderAccountsView(){
     <div class="filter-bar"><div class="page-title">${showArchived?'Archived Accounts':'Manage Accounts'}</div><div class="spacer"></div>
       ${archivedCount>0?`<button class="btn btn-ghost" onclick="toggleShowArchived()">${showArchived?'← Back to active':`📁 Show archived (${archivedCount})`}</button>`:''}
       <button class="btn btn-ghost" onclick="showPropFirmModal()">🏢 Prop Firms</button>
+      <button class="btn btn-ghost" onclick="syncFeesToDB()" title="Write the journal's calculated commission values back to Supabase so both match">↺ Sync Fees to DB</button>
       <button class="btn btn-primary" onclick="showAddAccount()">+ Add Account</button>
     </div>
     ${!visible.length?`<div class="empty-state"><div class="empty-icon">${showArchived?'📁':'🗂'}</div><div class="empty-title">${showArchived?'No archived accounts':'No accounts yet'}</div>${showArchived?'<div class="empty-sub">Closed accounts will appear here.</div>':''}</div>`:
