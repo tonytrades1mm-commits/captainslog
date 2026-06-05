@@ -607,7 +607,22 @@ input[type=file]{display:none;}
       <div style="font-size:11px;color:#6b7898;margin-bottom:8px;">Round-trip rate per contract. Use <code style="background:#161b28;padding:1px 5px;border-radius:3px;color:#c8d4e8;">default</code> as fallback. Symbol prefixes work (e.g. NQ matches NQH6, NQM6).</div>
       <div id="pfAuditCallout" style="display:none;"></div>
       <div id="pfRatesList" style="margin-bottom:10px;"></div>
-      <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;" onclick="addRateRow()">＋ Add Rate</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;" onclick="addRateRow()">＋ Add Rate</button>
+        <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;color:#3b82f6;border-color:#3b82f640;" onclick="toggleRateCalc()">🧮 Rate Calculator</button>
+      </div>
+
+      <div id="rateCalcPanel" style="display:none;margin-top:12px;background:#0a0d14;border:1px solid #1e2540;border-radius:9px;padding:12px;">
+        <div style="font-size:11px;color:#c8d4e8;font-weight:500;margin-bottom:4px;">Calculate rates from your broker statement</div>
+        <div style="font-size:10px;color:#6b7898;margin-bottom:10px;line-height:1.5;">For each symbol, pull one real trade from your broker dashboard and enter its <span style="color:#9ba8c4;">Fees</span>, <span style="color:#9ba8c4;">Commission</span>, and <span style="color:#9ba8c4;">contract count</span>. The per-contract rate is computed as (Fees + Commission) ÷ contracts.</div>
+        <div id="rateCalcRows"></div>
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;" onclick="addCalcRow()">＋ Add Symbol</button>
+          <div style="flex:1;"></div>
+          <button class="btn btn-primary" style="font-size:11px;padding:5px 12px;" onclick="applyCalcRates()">↓ Apply to Rates</button>
+        </div>
+      </div>
+      <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;display:none;" onclick="addRateRow()">＋ Add Rate</button>
 
       <div class="modal-actions" style="margin-top:14px;">
         <button class="btn btn-danger" id="pfDeleteBtn" style="display:none;" onclick="deletePropFirm()">Delete</button>
@@ -1365,6 +1380,13 @@ function renderPropFirmList(){
   }).join('');
 }
 
+function resetRateCalc(){
+  const panel=document.getElementById('rateCalcPanel');
+  if(panel)panel.style.display='none';
+  const rows=document.getElementById('rateCalcRows');
+  if(rows)rows.innerHTML='';
+}
+
 function newPropFirm(){
   document.getElementById('propFirmModalTitle').textContent='New Prop Firm';
   document.getElementById('pfEditId').value='';
@@ -1372,6 +1394,7 @@ function newPropFirm(){
   pfSelectedColor=PF_COLORS[0];
   renderPfColorSwatches();
   renderPfRatesList([]);
+  resetRateCalc();
   const callout=document.getElementById('pfAuditCallout');
   if(callout){callout.style.display='none';callout.innerHTML='';}
   document.getElementById('pfDeleteBtn').style.display='none';
@@ -1387,6 +1410,7 @@ function editPropFirm(id){
   renderPfColorSwatches();
   const rates=state.commissionRates.filter(r=>r.prop_firm_id===id);
   renderPfRatesList(rates);
+  resetRateCalc();
   // Show audit callout above the rates list if anything's wrong
   const audit=auditPropFirmCoverage(p);
   const callout=document.getElementById('pfAuditCallout');
@@ -1464,6 +1488,91 @@ function getRateRowsData(){
     }
   });
   return data;
+}
+
+// ── RATE CALCULATOR ──────────────────────────────────────────────────────────
+// Computes per-contract round-trip rates from broker statement values.
+// Formula: (Fees + Commission) / contracts. Then writes results into the
+// rate rows above, so the normal Save flow persists them (with correct user_id).
+function toggleRateCalc(){
+  const panel=document.getElementById('rateCalcPanel');
+  const opening=panel.style.display==='none';
+  panel.style.display=opening?'block':'none';
+  if(opening && !document.querySelectorAll('#rateCalcRows .calc-row').length){
+    // Seed with any symbols already present in the rate rows, else one blank row
+    const existing=getRateRowsData().map(r=>r.symbol_pattern).filter(s=>s&&s!=='DEFAULT');
+    if(existing.length){existing.forEach(s=>addCalcRow(s));}
+    else{addCalcRow();}
+  }
+}
+
+function calcRowHtml(symbol){
+  return`<div class="calc-row" style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
+    <input type="text" placeholder="MNQ" value="${symbol||''}" class="calc-symbol" oninput="recalcRow(this)" style="background:#161b28;border:1px solid #1e2540;border-radius:6px;padding:6px 8px;color:#c8d4e8;font-size:11px;width:70px;text-transform:uppercase;"/>
+    <span style="font-size:10px;color:#6b7898;">Fees $</span>
+    <input type="number" step="0.01" placeholder="1.12" class="calc-fees" oninput="recalcRow(this)" style="background:#161b28;border:1px solid #1e2540;border-radius:6px;padding:6px 8px;color:#c8d4e8;font-family:'DM Mono',monospace;font-size:11px;width:70px;"/>
+    <span style="font-size:10px;color:#6b7898;">Comm $</span>
+    <input type="number" step="0.01" placeholder="0.70" class="calc-comm" oninput="recalcRow(this)" style="background:#161b28;border:1px solid #1e2540;border-radius:6px;padding:6px 8px;color:#c8d4e8;font-family:'DM Mono',monospace;font-size:11px;width:70px;"/>
+    <span style="font-size:10px;color:#6b7898;">÷</span>
+    <input type="number" step="1" placeholder="ct" class="calc-qty" oninput="recalcRow(this)" style="background:#161b28;border:1px solid #1e2540;border-radius:6px;padding:6px 8px;color:#c8d4e8;font-family:'DM Mono',monospace;font-size:11px;width:50px;"/>
+    <span style="font-size:11px;color:#6b7898;">=</span>
+    <span class="calc-result" style="font-family:'DM Mono',monospace;font-size:12px;color:#22c55e;font-weight:600;min-width:64px;">$—</span>
+    <button onclick="this.parentElement.remove()" style="background:transparent;border:none;color:#4b5a7a;cursor:pointer;font-size:12px;padding:4px 6px;margin-left:auto;" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='#4b5a7a'">✕</button>
+  </div>`;
+}
+
+function addCalcRow(symbol){
+  document.getElementById('rateCalcRows').insertAdjacentHTML('beforeend', calcRowHtml(symbol));
+}
+
+function recalcRow(el){
+  const row=el.closest('.calc-row');
+  const fees=parseFloat(row.querySelector('.calc-fees').value)||0;
+  const comm=parseFloat(row.querySelector('.calc-comm').value)||0;
+  const qty=parseFloat(row.querySelector('.calc-qty').value)||0;
+  const resultEl=row.querySelector('.calc-result');
+  if(qty>0 && (fees>0||comm>0)){
+    const rate=(fees+comm)/qty;
+    resultEl.textContent='$'+rate.toFixed(2);
+    resultEl.style.color='#22c55e';
+  }else{
+    resultEl.textContent='$—';
+    resultEl.style.color='#4b5a7a';
+  }
+}
+
+function applyCalcRates(){
+  const calcRows=document.querySelectorAll('#rateCalcRows .calc-row');
+  const computed=[];
+  calcRows.forEach(row=>{
+    const sym=row.querySelector('.calc-symbol').value.trim().toUpperCase();
+    const fees=parseFloat(row.querySelector('.calc-fees').value)||0;
+    const comm=parseFloat(row.querySelector('.calc-comm').value)||0;
+    const qty=parseFloat(row.querySelector('.calc-qty').value)||0;
+    if(sym && qty>0 && (fees>0||comm>0)){
+      computed.push({symbol:sym, rate:+((fees+comm)/qty).toFixed(2)});
+    }
+  });
+  if(!computed.length){toast('Enter Fees, Commission, and contracts for at least one symbol','error');return;}
+  // Merge into existing rate rows: update matching symbols, add new ones
+  const existingRows=document.querySelectorAll('#pfRatesList .pf-rate-row');
+  const existingSymbols={};
+  existingRows.forEach(row=>{
+    const s=row.querySelector('.pf-rate-symbol').value.trim().toUpperCase();
+    if(s)existingSymbols[s]=row;
+  });
+  let updated=0,added=0;
+  computed.forEach(c=>{
+    if(existingSymbols[c.symbol]){
+      existingSymbols[c.symbol].querySelector('.pf-rate-value').value=c.rate;
+      updated++;
+    }else{
+      document.getElementById('pfRatesList').insertAdjacentHTML('beforeend', renderRateRow(c.symbol, c.rate, Date.now()+Math.random()));
+      added++;
+    }
+  });
+  document.getElementById('rateCalcPanel').style.display='none';
+  toast(`${updated} rate${updated!==1?'s':''} updated, ${added} added — review and hit Save`,'success');
 }
 
 function cancelPropFirmEdit(){
