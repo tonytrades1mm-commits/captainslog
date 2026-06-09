@@ -943,14 +943,32 @@ function calcTrailingDD(acct) {
   };
 }
 
+// PostgREST caps each read at the server's db-max-rows (1000 by default).
+// For tables that can exceed that (notably trades), fetch in pages using
+// limit/offset until a short page signals the end. Without this, only the
+// first 1000 rows load and newer rows silently vanish on refresh.
+async function sbGetAll(table, baseQuery=''){
+  const PAGE=1000;
+  let offset=0, all=[];
+  while(true){
+    const sep = baseQuery.includes('?') ? '&' : '?';
+    const page = await sb.get(table, `${baseQuery}${sep}limit=${PAGE}&offset=${offset}`);
+    if(!page || !page.length) break;
+    all = all.concat(page);
+    if(page.length < PAGE) break;  // last page
+    offset += PAGE;
+  }
+  return all;
+}
+
 // ── LOAD DATA ─────────────────────────────────────────────────────────────────
 async function loadData(){
   setSyncStatus('syncing','Loading...');
   try{
     const[accounts,trades,withdrawals,groups,propFirms,commRates]=await Promise.all([
       sb.get('accounts','?order=created_at.asc'),
-      sb.get('trades','?order=date.asc'),
-      sb.get('withdrawals','?order=date.asc'),
+      sbGetAll('trades','?order=date.asc'),
+      sbGetAll('withdrawals','?order=date.asc'),
       sb.get('groups','?order=created_at.asc'),
       sb.get('prop_firms','?order=created_at.asc'),
       sb.get('commission_rates','?order=created_at.asc')
