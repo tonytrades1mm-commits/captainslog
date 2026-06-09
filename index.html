@@ -943,20 +943,19 @@ function calcTrailingDD(acct) {
   };
 }
 
-// PostgREST caps each read at the server's db-max-rows (1000 by default).
-// For tables that can exceed that (notably trades), fetch in pages using
-// limit/offset until a short page signals the end. Without this, only the
-// first 1000 rows load and newer rows silently vanish on refresh.
+// PostgREST caps each read at the server's db-max-rows. We don't know that cap
+// (could be 1000, could be less), so we DON'T assume a page size. We request up
+// to 1000 per page, advance the offset by however many rows actually came back,
+// and stop only when a page returns zero rows. This is correct for any cap.
+// A guard caps total pages so a misbehaving server can't loop forever.
 async function sbGetAll(table, baseQuery=''){
-  const PAGE=1000;
-  let offset=0, all=[];
-  while(true){
+  let offset=0, all=[], guard=0;
+  while(guard++ < 500){
     const sep = baseQuery.includes('?') ? '&' : '?';
-    const page = await sb.get(table, `${baseQuery}${sep}limit=${PAGE}&offset=${offset}`);
-    if(!page || !page.length) break;
+    const page = await sb.get(table, `${baseQuery}${sep}limit=1000&offset=${offset}`);
+    if(!page || !page.length) break;   // no more rows
     all = all.concat(page);
-    if(page.length < PAGE) break;  // last page
-    offset += PAGE;
+    offset += page.length;             // advance by ACTUAL rows returned
   }
   return all;
 }
@@ -997,7 +996,9 @@ async function loadData(){
     });
     // Recalculate fees from prop firm rates (override stored fees if rate is set)
     applyCommissionRates();
-    setSyncStatus('ok','Synced');
+    const loadedTrades=state.accounts.reduce((s,a)=>s+a.trades.length,0);
+    console.log(`[loadData] Loaded ${loadedTrades} trades across ${state.accounts.length} accounts (raw rows fetched: ${trades.length})`);
+    setSyncStatus('ok',`${loadedTrades} trades`);
     document.getElementById('emptyTitle').textContent=state.accounts.length?'No trades yet':'No accounts yet';
     document.getElementById('emptySub').textContent=state.accounts.length?'Import a Tradovate CSV to get started.':'Create your first account to get started.';
     renderAll();
@@ -1188,6 +1189,18 @@ function currentBalance(acct){
   const pnl=acct.trades.reduce((s,t)=>s+t.netPnl,0);
   const wd=totalWithdrawals(acct);
   return acct.starting_balance+pnl-wd;
+}
+
+// Profit goal progress. The goal is a PROFIT target measured against cumulative
+// net P&L (after fees) — NOT the account balance. Comparing against balance was
+// a bug: an account whose starting capital already exceeds the goal would read
+// as "achieved" with zero or negative actual profit.
+function goalProgress(a){
+  if(!a.profit_goal) return null;
+  const profit=a.trades.reduce((s,t)=>s+t.netPnl,0);
+  const goal=a.profit_goal;
+  const pct=goal>0?Math.min(100,Math.max(0,(profit/goal)*100)):0;
+  return {profit, goal, pct, achieved:profit>=goal, remaining:goal-profit};
 }
 
 // ── GROUP CRUD ────────────────────────────────────────────────────────────────
@@ -2177,7 +2190,7 @@ function renderSidebar(){
     const soloOnly=!isAllSelected()&&state.selectedIds.size===1&&state.selectedIds.has(a.id);
     const dd=calcTrailingDD(a);
     const isBlown=dd&&dd.blown;
-    const goalAchieved=a.profit_goal&&(currentBalance(a)!==null?currentBalance(a)>=a.profit_goal:grossPnl>=a.profit_goal);
+    const goalAchieved=a.profit_goal&&goalProgress(a).achieved;
     const currentBal2=currentBalance(a);
     const wd=totalWithdrawals(a);
     const netAfterWd=netPnl-wd;
@@ -2597,19 +2610,16 @@ function renderDashboard(trades){
         <div style="background:#111520;border-radius:10px;padding:16px;">
           <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:12px;">🎯 Profit Goals</div>
           ${goalAcctsInView.length?goalAcctsInView.map(a=>{
+            const gp=goalProgress(a);
             const bal=currentBalance(a);
             const hasBal=bal!==null;
-            const currentVal=hasBal?bal:a.trades.reduce((s,t)=>s+t.pnl,0);
-            const goal=a.profit_goal;
-            const startBal=a.starting_balance||0;
-            // Progress = profit made / profit needed (0% to 100%)
-            const profitMade=hasBal?currentVal-startBal:currentVal;
-            const profitNeeded=hasBal?goal-startBal:goal;
-            const pct=profitNeeded>0?Math.min(100,Math.max(0,(profitMade/profitNeeded)*100)):0;
-            const achieved=currentVal>=goal;
-            const remaining=goal-currentVal;
+            const currentVal=gp.profit;
+            const goal=gp.goal;
+            const pct=gp.pct;
+            const achieved=gp.achieved;
+            const remaining=gp.remaining;
             const fillColor=achieved?'#f59e0b':pct>75?'#22c55e':pct>40?'#3b82f6':'#6b7898';
-            const valColor=achieved?'#f59e0b':hasBal?(bal>=(a.starting_balance||0)?'#22c55e':'#ef4444'):'#c8d4e8';
+            const valColor=achieved?'#f59e0b':currentVal>=0?'#22c55e':'#ef4444';
             return`<div style="margin-bottom:16px;">
               <!-- Account name + badge + edit -->
               <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
@@ -2618,30 +2628,29 @@ function renderDashboard(trades){
                 ${achieved?'<span style="font-size:10px;background:#1a1200;color:#f59e0b;padding:1px 6px;border-radius:4px;border:1px solid #f59e0b40;margin-left:4px;">🏆 Done</span>':''}
                 <span onclick="showEditGoal('${a.id}')" style="margin-left:auto;font-size:11px;color:#e2e8f0;cursor:pointer;padding:4px 10px;border-radius:5px;border:1px solid #2a3558;background:#1a2035;white-space:nowrap;display:flex;align-items:center;gap:5px;font-weight:500;" onmouseover="this.style.background='#1e2a45';this.style.borderColor='#3b82f6'" onmouseout="this.style.background='#1a2035';this.style.borderColor='#2a3558'"><span style="color:#ef4444;font-size:12px;">✎</span> Edit Goal</span>
               </div>
-              <!-- Current balance + target -->
+              <!-- Profit so far + target -->
               <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px;">
-                <div style="font-size:16px;font-weight:600;font-family:'DM Mono',monospace;color:${valColor};">${fmtC(currentVal)}</div>
-                <div style="font-size:11px;color:#374060;">/ ${fmtC(goal)}</div>
+                <div style="font-size:16px;font-weight:600;font-family:'DM Mono',monospace;color:${valColor};">${fmtM(currentVal)}</div>
+                <div style="font-size:11px;color:#374060;">/ ${fmtC(goal)} profit</div>
                 <div style="font-size:10px;color:#4b5a7a;margin-left:auto;">${pct.toFixed(1)}% of profit target</div>
               </div>
-              ${!hasBal?`<div style="font-size:10px;color:#f59e0b;margin-bottom:6px;">⚠ Set a Starting Balance for balance-based tracking</div>`:''}
-              <!-- Progress bar: 0% = starting balance, 100% = goal balance -->
+              <!-- Progress bar: 0% = no profit, 100% = goal profit -->
               <div style="position:relative;margin-bottom:10px;">
                 <div style="height:10px;background:#161b28;border-radius:5px;overflow:hidden;">
                   <div style="height:100%;width:${pct.toFixed(1)}%;background:${fillColor};border-radius:5px;transition:width .5s;${achieved?'box-shadow:0 0 8px #f59e0b60':''}"></div>
                 </div>
                 <div style="display:flex;justify-content:space-between;font-size:9px;color:#374060;margin-top:3px;">
-                  <span>${hasBal?fmtC(startBal):'$0'}</span>
+                  <span>$0</span>
                   <span>${fmtC(goal)}</span>
                 </div>
               </div>
-              <!-- BIG "balance needed" -->
+              <!-- BIG "profit needed" -->
               <div style="display:flex;align-items:baseline;justify-content:flex-end;">
                 ${achieved
                   ?`<div style="font-size:22px;font-weight:700;font-family:'DM Mono',monospace;color:#f59e0b;">Goal reached! 🎉</div>`
                   :`<div style="text-align:right;">
-                      <div style="font-size:11px;color:#4b5a7a;margin-bottom:2px;">Balance needed</div>
-                      <div style="font-size:28px;font-weight:700;font-family:'DM Mono',monospace;color:#ef4444;letter-spacing:-.5px;">${fmtC(remaining)}</div>
+                      <div style="font-size:11px;color:#4b5a7a;margin-bottom:2px;">Profit needed</div>
+                      <div style="font-size:28px;font-weight:700;font-family:'DM Mono',monospace;color:#ef4444;letter-spacing:-.5px;">${fmtM(remaining)}</div>
                     </div>`
                 }
               </div>
@@ -2818,12 +2827,12 @@ function renderGoalCards(accounts){
       <span style="font-size:10px;color:#4b5a7a;font-weight:400;">(total P&L vs target)</span>
     </div>
     ${goalAccts.map(a=>{
-      const bal=currentBalance(a);
-      const currentVal=bal!==null?bal:a.trades.reduce((s,t)=>s+t.pnl,0);
-      const goal=a.profit_goal;
-      const pct=Math.min(100,Math.max(0,(currentVal/goal)*100));
-      const achieved=currentVal>=goal;
-      const remaining=goal-currentVal;
+      const gp=goalProgress(a);
+      const currentVal=gp.profit;
+      const goal=gp.goal;
+      const pct=gp.pct;
+      const achieved=gp.achieved;
+      const remaining=gp.remaining;
       const fillColor=achieved?'#f59e0b':pct>75?'#22c55e':pct>40?'#3b82f6':'#6b7898';
       return`<div class="goal-card${achieved?' achieved':''}" style="${achieved?'border-color:#f59e0b60;':''}">
         <div class="goal-label">
@@ -4671,14 +4680,12 @@ const celebratedGoals=new Set();
 
 function checkGoalAchievements(showPopup=true){
   state.accounts.forEach(a=>{
-    if(!a.profit_goal)return;
-    const bal=currentBalance(a);
-    const currentVal=bal!==null?bal:a.trades.reduce((s,t)=>s+t.pnl,0);
-    const achieved=currentVal>=a.profit_goal;
+    const gp=goalProgress(a);
+    if(!gp)return;
     const key=`${a.id}_${a.profit_goal}`;
-    if(achieved&&showPopup&&!celebratedGoals.has(key)){
+    if(gp.achieved&&showPopup&&!celebratedGoals.has(key)){
       celebratedGoals.add(key);
-      setTimeout(()=>showGoalPopup(a.name,currentVal),400);
+      setTimeout(()=>showGoalPopup(a.name,gp.profit),400);
     }
   });
 }
