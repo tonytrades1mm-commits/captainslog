@@ -1002,6 +1002,9 @@ async function loadData(){
     document.getElementById('emptyTitle').textContent=state.accounts.length?'No trades yet':'No accounts yet';
     document.getElementById('emptySub').textContent=state.accounts.length?'Import a Tradovate CSV to get started.':'Create your first account to get started.';
     renderAll();
+    // Restore the tab the user was last on (and its scroll position), instead
+    // of always snapping back to the dashboard on refresh.
+    restoreActiveTab();
     setTimeout(()=>checkGoalAchievements(false),800);
   }catch(e){setSyncStatus('err','Connection error');document.getElementById('emptyTitle').textContent='Could not connect';document.getElementById('emptySub').textContent='Check your internet connection.';toast('Failed to connect','error');}
 }
@@ -1247,16 +1250,27 @@ function currentBalance(acct){
   return acct.starting_balance+pnl-wd;
 }
 
-// Profit goal progress. The goal is a PROFIT target measured against cumulative
-// net P&L (after fees) — NOT the account balance. Comparing against balance was
-// a bug: an account whose starting capital already exceeds the goal would read
-// as "achieved" with zero or negative actual profit.
+// Profit goal progress. The goal value (profit_goal) is entered as a TARGET
+// BALANCE. The profit needed to reach it is (target balance − starting balance),
+// and progress toward it is the account's balance growth (net P&L − withdrawals),
+// so "achieved" is exactly when current balance ≥ target balance.
+// If no starting balance is set, there's nothing to subtract, so the goal is
+// treated as a direct profit target instead.
 function goalProgress(a){
   if(!a.profit_goal) return null;
-  const profit=a.trades.reduce((s,t)=>s+t.netPnl,0);
-  const goal=a.profit_goal;
-  const pct=goal>0?Math.min(100,Math.max(0,(profit/goal)*100)):0;
-  return {profit, goal, pct, achieved:profit>=goal, remaining:goal-profit};
+  const pnl=a.trades.reduce((s,t)=>s+t.netPnl,0);
+  const wd=totalWithdrawals(a);
+  let target, progress, targetBalance=null;
+  if(a.starting_balance){
+    target = a.profit_goal - a.starting_balance; // profit needed to hit target balance
+    progress = pnl - wd;                          // balance growth (matches displayed balance)
+    targetBalance = a.profit_goal;
+  } else {
+    target = a.profit_goal;                       // no starting balance → direct profit target
+    progress = pnl;
+  }
+  const pct = target>0 ? Math.min(100,Math.max(0,(progress/target)*100)) : (progress>=target?100:0);
+  return {profit:progress, goal:target, pct, achieved:progress>=target, remaining:target-progress, targetBalance};
 }
 
 // ── GROUP CRUD ────────────────────────────────────────────────────────────────
@@ -1294,7 +1308,7 @@ function renderGroupColorSwatches(){
 function pickGroupColor(c){groupSelectedColor=c;renderGroupColorSwatches();}
 
 function renderGroupAcctList(selectedIds){
-  document.getElementById('groupAcctList').innerHTML=state.accounts.map(a=>`
+  document.getElementById('groupAcctList').innerHTML=liveAccounts().map(a=>`
     <label class="group-acct-check">
       <input type="checkbox" value="${a.id}" ${selectedIds.includes(a.id)?'checked':''}>
       <div style="width:8px;height:8px;border-radius:50%;background:${a.color};"></div>
@@ -1349,7 +1363,9 @@ async function deleteGroup(){
 function selectGroup(id){
   const g=state.groups.find(x=>x.id===id);if(!g)return;
   state.activeGroupId=id;
-  state.selectedIds=new Set(g.account_ids);
+  // Only select live members — archived accounts in a group are ignored everywhere
+  const liveIds=new Set(liveAccounts().map(a=>a.id));
+  state.selectedIds=new Set((g.account_ids||[]).filter(aid=>liveIds.has(aid)));
   renderAll();
 }
 
@@ -2217,17 +2233,86 @@ function renderSelPills(){const active=getActiveAccounts();if(active.length===li
 
 // ── NAVIGATION ────────────────────────────────────────────────────────────────
 function setTab(tab,el){
+  // Remember where we were on the tab we're leaving
+  saveScrollForTab(state.activeTab);
   state.activeTab=tab;
+  try{ localStorage.setItem('moonshot_active_tab', tab); }catch(e){}
   document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
-  el.classList.add('active');
+  if(el)el.classList.add('active');
   // Sync mobile bottom nav
   document.querySelectorAll('.mob-nav-btn').forEach(b=>b.classList.remove('active'));
   const mobId=document.getElementById(`mob-${tab}`);
   if(mobId) mobId.classList.add('active');
   renderContent();
   closeSidebar();
+  // After content renders, restore this tab's last scroll position
+  restoreScrollForTab(tab);
+}
+
+// Per-tab scroll memory. We store the scroll offset of the main scroll
+// container keyed by tab, so returning to a tab (or refreshing) lands you where
+// you left off instead of jumping to the top.
+function getScrollEl(){
+  return document.querySelector('.content') || document.scrollingElement || document.documentElement;
+}
+function saveScrollForTab(tab){
+  if(!tab)return;
+  try{
+    const el=getScrollEl();
+    const map=JSON.parse(localStorage.getItem('moonshot_scroll')||'{}');
+    map[tab]=el?el.scrollTop:0;
+    localStorage.setItem('moonshot_scroll', JSON.stringify(map));
+  }catch(e){}
+}
+function restoreScrollForTab(tab){
+  try{
+    const map=JSON.parse(localStorage.getItem('moonshot_scroll')||'{}');
+    const y=map[tab]||0;
+    // Wait a frame so the freshly-rendered content has its full height
+    requestAnimationFrame(()=>{ const el=getScrollEl(); if(el) el.scrollTop=y; });
+  }catch(e){}
 }
 function renderAll(){renderSidebar();renderContent();}
+
+// Expand/collapse a dashboard account row. Rows always start collapsed on each
+// render/refresh (no persisted open state, per design).
+function toggleAcctRow(rid){
+  const body=document.getElementById(rid+'_body');
+  const chev=document.getElementById(rid+'_chev');
+  if(!body)return;
+  const open=body.style.display==='block';
+  body.style.display=open?'none':'block';
+  if(chev)chev.style.transform=open?'rotate(0deg)':'rotate(180deg)';
+}
+
+// On boot, jump to whichever tab the user was last viewing (saved in setTab).
+// Falls back to dashboard if nothing saved or the value is unrecognized.
+function restoreActiveTab(){
+  let tab='dashboard';
+  try{ tab=localStorage.getItem('moonshot_active_tab')||'dashboard'; }catch(e){}
+  const tabIndex={dashboard:0,trades:1,analytics:2,drawdown:3,calendar:4,accounts:5};
+  if(!(tab in tabIndex)) tab='dashboard';
+  const desktopTabs=document.querySelectorAll('.nav-tab');
+  setTab(tab, desktopTabs[tabIndex[tab]]);
+}
+
+// Keep the current tab's scroll position fresh so a plain page refresh (which
+// never calls setTab) still restores where you were. Debounced on scroll, and
+// a final save right before the page unloads.
+(function setupScrollPersistence(){
+  let t;
+  const attach=()=>{
+    const el=document.querySelector('.content');
+    if(!el) return;
+    el.addEventListener('scroll',()=>{
+      clearTimeout(t);
+      t=setTimeout(()=>saveScrollForTab(state.activeTab),150);
+    },{passive:true});
+  };
+  window.addEventListener('beforeunload',()=>saveScrollForTab(state.activeTab));
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',attach);
+  else attach();
+})();
 
 function renderSidebar(){
   const live=liveAccounts();
@@ -2572,6 +2657,26 @@ function renderDashboard(trades){
   const combinedCurrentBal=acctBalStats.reduce((s,a)=>s+a.currentBal,0);
   const combinedPct=combinedStartBal>0?((combinedCurrentBal-combinedStartBal)/combinedStartBal)*100:null;
 
+  // Unified per-account rows for the compact dashboard panel. Every active
+  // account appears, even with no starting balance or no goal (missing pieces
+  // just render blank). Combines balance + goal so each account is one row.
+  const acctRows=activeAccts.map(a=>{
+    const pnl=a.trades.reduce((s,t)=>s+t.netPnl,0);
+    const wd=totalWithdrawals(a);
+    const bal=currentBalance(a); // null if no starting balance
+    const pct=a.starting_balance?((pnl-wd)/a.starting_balance)*100:null;
+    const gp=goalProgress(a);    // null if no goal
+    return {id:a.id,name:a.name,color:a.color,pnl,wd,bal,pct,
+      hasBal:bal!==null, gp, hasGoal:!!gp};
+  });
+  const combinedGoalPct=(()=>{
+    const withGoal=acctRows.filter(r=>r.hasGoal);
+    if(!withGoal.length) return null;
+    const prof=withGoal.reduce((s,r)=>s+r.gp.profit,0);
+    const goalSum=withGoal.reduce((s,r)=>s+r.gp.goal,0);
+    return goalSum>0?Math.min(100,Math.max(0,(prof/goalSum)*100)):0;
+  })();
+
   document.getElementById('dashboardView').innerHTML=`
 
     <!-- ── DASHBOARD HEADER ─────────────────────────────────── -->
@@ -2597,7 +2702,7 @@ function renderDashboard(trades){
             <div style="font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:1px;padding:8px 10px 4px;font-weight:500;">Groups</div>
             ${state.groups.map(g=>{
               const isActive=state.activeGroupId===g.id;
-              const accts=state.accounts.filter(a=>g.account_ids.includes(a.id));
+              const accts=liveAccounts().filter(a=>g.account_ids.includes(a.id));
               const gPnl=accts.reduce((s,a)=>s+a.trades.reduce((ss,t)=>ss+t.netPnl,0),0);
               return`<div onclick="selectGroup('${g.id}');closeAcctDropdown()" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:12px;${isActive?'background:#1a2035;':''}" onmouseover="this.style.background='#161b28'" onmouseout="this.style.background='${isActive?'#1a2035':'transparent'}'">
                 <div style="width:20px;height:20px;border-radius:5px;background:${g.color}20;display:flex;align-items:center;justify-content:center;">
@@ -2610,7 +2715,7 @@ function renderDashboard(trades){
             <div style="border-top:1px solid #1e2540;margin:4px 0;"></div>`:''}
             <!-- INDIVIDUAL ACCOUNTS -->
             <div style="font-size:9px;color:#374060;text-transform:uppercase;letter-spacing:1px;padding:8px 10px 4px;font-weight:500;">Individual Accounts</div>
-            ${state.accounts.map(a=>{
+            ${liveAccounts().map(a=>{
               const isSelected=!isAllSelected()&&!state.activeGroupId&&state.selectedIds.has(a.id);
               const aPnl=a.trades.reduce((s,t)=>s+t.netPnl,0);
               const aBal=currentBalance(a)?fmtC(currentBalance(a)):fmtM(aPnl);
@@ -2629,117 +2734,85 @@ function renderDashboard(trades){
         ${blownAccts.map(a=>`<div style="display:flex;align-items:center;gap:6px;background:#1a0808;border:1px solid #ef444440;border-radius:6px;padding:5px 10px;font-size:11px;color:#ef4444;">🚨 ${a.name} blown — <span style="cursor:pointer;text-decoration:underline;" onclick="setTab('drawdown',document.querySelectorAll('.nav-tab')[3])">View</span></div>`).join('')}
       </div>
 
-      <!-- Balance + Goal Row -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+      <!-- Today's P&L strip (pulled out to its own full-width row) -->
+      ${(()=>{
+        const today=new Date().toDateString();
+        const todayTrades=getActiveTrades().filter(t=>t.date.toDateString()===today);
+        const todayLogical=groupFills(todayTrades);
+        const todayPnl=todayTrades.reduce((s,t)=>s+t.netPnl,0);
+        const todayWins=todayLogical.filter(t=>t.netPnl>0).length;
+        const todayLosses=todayLogical.filter(t=>t.netPnl<0).length;
+        const todayWR=todayLogical.length?(todayWins/todayLogical.length*100).toFixed(0):0;
+        const isPos=todayPnl>=0;
+        const hasToday=todayTrades.length>0;
+        const pnlColor=isPos?'#22c55e':'#ef4444';
+        const bg=hasToday?(isPos?'rgba(34,197,94,0.06)':'rgba(239,68,68,0.06)'):'#111520';
+        const border=hasToday?(isPos?'#22c55e25':'#ef444425'):'#1a1f2e';
+        return`<div style="background:${bg};border:1px solid ${border};border-radius:10px;padding:14px 16px;margin-bottom:14px;display:flex;align-items:center;gap:18px;flex-wrap:wrap;">
+          <div>
+            <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">Today's P&amp;L</div>
+            <div style="font-size:30px;font-weight:700;font-family:'DM Mono',monospace;color:${hasToday?pnlColor:'#374060'};letter-spacing:-.5px;line-height:1;">${hasToday?(isPos?'+':'')+fmtC(todayPnl):'–'}</div>
+          </div>
+          ${hasToday?`<div style="display:flex;gap:18px;flex-wrap:wrap;margin-left:auto;">
+            <div style="text-align:center;"><div style="font-size:9px;color:#374060;margin-bottom:2px;">Trades</div><div style="font-size:15px;font-weight:600;font-family:'DM Mono',monospace;color:#e2e8f0;">${todayTrades.length}</div></div>
+            <div style="text-align:center;"><div style="font-size:9px;color:#374060;margin-bottom:2px;">Win Rate</div><div style="font-size:15px;font-weight:600;font-family:'DM Mono',monospace;color:${todayWR>=50?'#22c55e':'#ef4444'}">${todayWR}%</div></div>
+            <div style="text-align:center;"><div style="font-size:9px;color:#374060;margin-bottom:2px;">W / L</div><div style="font-size:15px;font-weight:600;font-family:'DM Mono',monospace;"><span style="color:#22c55e;">${todayWins}</span><span style="color:#374060;">/</span><span style="color:#ef4444;">${todayLosses}</span></div></div>
+          </div>`:'<div style="font-size:11px;color:#374060;font-style:italic;margin-left:auto;">No trades today</div>'}
+        </div>`;
+      })()}
 
-        <!-- BALANCE PANEL -->
-        <div style="background:#111520;border-radius:10px;padding:16px;">
-          <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:12px;">Account Balance</div>
-          ${acctBalStats.length?`
-            ${acctBalStats.length>1&&combinedStartBal>0?`<div style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #1a1f2e;">
-              <div style="font-size:11px;color:#6b7898;margin-bottom:4px;">Combined</div>
-              <div style="font-size:26px;font-weight:700;font-family:'DM Mono',monospace;color:#fff;letter-spacing:-.5px;">${fmtC(combinedCurrentBal)}</div>
-              <div style="display:flex;gap:10px;margin-top:4px;">
-                <span style="font-size:12px;font-family:'DM Mono',monospace;color:${netPnl>=0?'#22c55e':'#ef4444'}">${netPnl>=0?'+':''}${fmtM(netPnl)}</span>
-                ${combinedPct!==null?`<span style="font-size:12px;font-family:'DM Mono',monospace;color:${combinedPct>=0?'#22c55e':'#ef4444'}">${combinedPct>=0?'+':''}${combinedPct.toFixed(2)}%</span>`:''}
-              </div>
-            </div>`:''}
-            ${acctBalStats.map(a=>`<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #1a1f2e;">
-              <div style="width:8px;height:8px;border-radius:50%;background:${a.color};flex-shrink:0;"></div>
-              <div style="flex:1;min-width:0;">
-                <div style="font-size:10px;color:#6b7898;margin-bottom:2px;">${a.name}</div>
-                <div style="font-size:22px;font-weight:700;font-family:'DM Mono',monospace;color:#fff;">${fmtC(a.currentBal)}</div>
-                <div style="display:flex;gap:8px;margin-top:3px;flex-wrap:wrap;">
-                  <span style="font-size:11px;font-family:'DM Mono',monospace;color:${a.pnl>=0?'#22c55e':'#ef4444'}">${a.pnl>=0?'+':''}${fmtM(a.pnl)} P&amp;L</span>
-                  <span style="font-size:11px;font-family:'DM Mono',monospace;color:${a.pct>=0?'#22c55e':'#ef4444'}">${a.pct>=0?'+':''}${a.pct.toFixed(2)}%</span>
-                  ${a.wd>0?`<span style="font-size:11px;font-family:'DM Mono',monospace;color:#f59e0b;">−${fmtC(a.wd)} withdrawn</span>`:''}
-                </div>
-              </div>
-              <button onclick="showWithdrawalModal('${a.id}')" style="flex-shrink:0;padding:5px 10px;border-radius:6px;border:1px solid #1e2540;background:transparent;color:#6b7898;font-size:10px;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;" onmouseover="this.style.color='#c8d4e8';this.style.background='#161b28'" onmouseout="this.style.color='#6b7898';this.style.background='transparent'">💸 Payout</button>
-            </div>`).join('')}
-            ${(()=>{
-              const today=new Date().toDateString();
-              const todayTrades=getActiveTrades().filter(t=>t.date.toDateString()===today);
-              const todayLogical=groupFills(todayTrades);
-              const todayPnl=todayTrades.reduce((s,t)=>s+t.netPnl,0);
-              const todayGross=todayTrades.reduce((s,t)=>s+t.pnl,0);
-              const todayWins=todayLogical.filter(t=>t.netPnl>0).length;
-              const todayLosses=todayLogical.filter(t=>t.netPnl<0).length;
-              const todayWR=todayLogical.length?(todayWins/todayLogical.length*100).toFixed(0):0;
-              const isPos=todayPnl>=0;
-              const hasToday=todayTrades.length>0;
-              const pnlColor=isPos?'#22c55e':'#ef4444';
-              const bg=hasToday?(isPos?'rgba(34,197,94,0.06)':'rgba(239,68,68,0.06)'):'transparent';
-              const border=hasToday?(isPos?'#22c55e25':'#ef444425'):'#1a1f2e';
-              return`<div style="background:${bg};border:1px solid ${border};border-radius:8px;padding:12px 14px;margin-top:4px;">
-                <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px;">Today's P&amp;L</div>
-                <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">
-                  <div style="font-size:28px;font-weight:700;font-family:'DM Mono',monospace;color:${hasToday?pnlColor:'#374060'};letter-spacing:-.5px;line-height:1;">${hasToday?(isPos?'+':'')+fmtC(todayPnl):'–'}</div>
-                  ${hasToday?`
-                  <div style="display:flex;gap:12px;flex-wrap:wrap;">
-                    <div style="text-align:center;"><div style="font-size:9px;color:#374060;margin-bottom:1px;">Trades</div><div style="font-size:13px;font-weight:600;font-family:'DM Mono',monospace;color:#e2e8f0;">${todayTrades.length}</div></div>
-                    <div style="text-align:center;"><div style="font-size:9px;color:#374060;margin-bottom:1px;">WR</div><div style="font-size:13px;font-weight:600;font-family:'DM Mono',monospace;color:${todayWR>=50?'#22c55e':'#ef4444'}">${todayWR}%</div></div>
-                    <div style="text-align:center;"><div style="font-size:9px;color:#374060;margin-bottom:1px;">W/L</div><div style="font-size:13px;font-weight:600;font-family:'DM Mono',monospace;"><span style="color:#22c55e;">${todayWins}</span><span style="color:#374060;">/</span><span style="color:#ef4444;">${todayLosses}</span></div></div>
-                  </div>`:'<div style="font-size:11px;color:#374060;font-style:italic;">No trades today</div>'}
-                </div>
-              </div>`;
-            })()}
-          `:`<div style="color:#4b5a7a;font-size:12px;">Set a starting balance in <span style="color:#3b82f6;cursor:pointer;" onclick="setTab('accounts',document.querySelectorAll('.nav-tab')[5])">Account Settings</span> to track balance.</div>`}
+      <!-- Compact account rows: balance + goal merged, click to expand -->
+      <div style="background:#111520;border-radius:10px;padding:14px 16px;">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;">
+          <span style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;">Accounts</span>
+          <span style="font-size:10px;color:#374060;">${acctRows.length} account${acctRows.length!==1?'s':''} · click a row for detail</span>
         </div>
-
-        <!-- GOAL PANEL -->
-        <div style="background:#111520;border-radius:10px;padding:16px;">
-          <div style="font-size:10px;color:#374060;text-transform:uppercase;letter-spacing:.8px;margin-bottom:12px;">🎯 Profit Goals</div>
-          ${goalAcctsInView.length?goalAcctsInView.map(a=>{
-            const gp=goalProgress(a);
-            const bal=currentBalance(a);
-            const hasBal=bal!==null;
-            const currentVal=gp.profit;
-            const goal=gp.goal;
-            const pct=gp.pct;
-            const achieved=gp.achieved;
-            const remaining=gp.remaining;
-            const fillColor=achieved?'#f59e0b':pct>75?'#22c55e':pct>40?'#3b82f6':'#6b7898';
-            const valColor=achieved?'#f59e0b':currentVal>=0?'#22c55e':'#ef4444';
-            return`<div style="margin-bottom:16px;">
-              <!-- Account name + badge + edit -->
-              <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
-                <div style="width:7px;height:7px;border-radius:50%;background:${a.color};flex-shrink:0;"></div>
-                <span style="font-size:11px;color:#c8d4e8;">${a.name}</span>
-                ${achieved?'<span style="font-size:10px;background:#1a1200;color:#f59e0b;padding:1px 6px;border-radius:4px;border:1px solid #f59e0b40;margin-left:4px;">🏆 Done</span>':''}
-                <span onclick="showEditGoal('${a.id}')" style="margin-left:auto;font-size:11px;color:#e2e8f0;cursor:pointer;padding:4px 10px;border-radius:5px;border:1px solid #2a3558;background:#1a2035;white-space:nowrap;display:flex;align-items:center;gap:5px;font-weight:500;" onmouseover="this.style.background='#1e2a45';this.style.borderColor='#3b82f6'" onmouseout="this.style.background='#1a2035';this.style.borderColor='#2a3558'"><span style="color:#ef4444;font-size:12px;">✎</span> Edit Goal</span>
-              </div>
-              <!-- Profit so far + target -->
-              <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px;">
-                <div style="font-size:16px;font-weight:600;font-family:'DM Mono',monospace;color:${valColor};">${fmtM(currentVal)}</div>
-                <div style="font-size:11px;color:#374060;">/ ${fmtC(goal)} profit</div>
-                <div style="font-size:10px;color:#4b5a7a;margin-left:auto;">${pct.toFixed(1)}% of profit target</div>
-              </div>
-              <!-- Progress bar: 0% = no profit, 100% = goal profit -->
-              <div style="position:relative;margin-bottom:10px;">
-                <div style="height:10px;background:#161b28;border-radius:5px;overflow:hidden;">
-                  <div style="height:100%;width:${pct.toFixed(1)}%;background:${fillColor};border-radius:5px;transition:width .5s;${achieved?'box-shadow:0 0 8px #f59e0b60':''}"></div>
+        ${acctRows.length?`
+          ${acctRows.length>1&&combinedStartBal>0?`<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#0c0e14;border:1px solid #1e2540;border-radius:8px;margin-bottom:8px;">
+            <div>
+              <div style="font-size:10px;color:#6b7898;">Combined balance</div>
+              <div style="font-size:24px;font-weight:700;font-family:'DM Mono',monospace;color:#fff;letter-spacing:-.5px;">${fmtC(combinedCurrentBal)}</div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:13px;font-family:'DM Mono',monospace;color:${netPnl>=0?'#22c55e':'#ef4444'}">${netPnl>=0?'+':''}${fmtM(netPnl)}</div>
+              <div style="font-size:11px;color:#6b7898;">${combinedPct!==null?`${combinedPct>=0?'+':''}${combinedPct.toFixed(2)}%`:''}${combinedGoalPct!==null?` · goals ${combinedGoalPct.toFixed(0)}%`:''}</div>
+            </div>
+          </div>`:''}
+          ${acctRows.map(r=>{
+            const pnlCol=r.pnl>=0?'#22c55e':'#ef4444';
+            const balText=r.hasBal?fmtC(r.bal):fmtM(r.pnl);
+            const gpct=r.hasGoal?r.gp.pct:null;
+            const done=r.hasGoal&&r.gp.achieved;
+            const fill=done?'#f59e0b':gpct>75?'#22c55e':gpct>40?'#3b82f6':'#6b7898';
+            const rid='acctrow_'+r.id;
+            return`<div style="background:#0c0e14;border:1px solid #1a1f2e;border-radius:8px;margin-bottom:6px;overflow:hidden;">
+              <div onclick="toggleAcctRow('${rid}')" style="display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;" onmouseover="this.style.background='#111520'" onmouseout="this.style.background='transparent'">
+                <div style="width:8px;height:8px;border-radius:50%;background:${r.color};flex-shrink:0;"></div>
+                <div style="width:84px;font-size:12px;color:#c8d4e8;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.name}</div>
+                <div style="width:92px;font-size:14px;font-weight:600;font-family:'DM Mono',monospace;color:#fff;flex-shrink:0;">${balText}</div>
+                <div style="width:74px;font-size:12px;font-family:'DM Mono',monospace;color:${pnlCol};flex-shrink:0;">${r.pnl>=0?'+':''}${fmtM(r.pnl)}</div>
+                <div style="flex:1;min-width:30px;">
+                  ${r.hasGoal?`<div style="height:6px;background:#161b28;border-radius:3px;overflow:hidden;"><div style="height:100%;width:${gpct.toFixed(1)}%;background:${fill};border-radius:3px;"></div></div>`:`<div style="font-size:10px;color:#374060;font-style:italic;">no goal</div>`}
                 </div>
-                <div style="display:flex;justify-content:space-between;font-size:9px;color:#374060;margin-top:3px;">
-                  <span>$0</span>
-                  <span>${fmtC(goal)}</span>
-                </div>
+                <div style="width:34px;text-align:right;font-size:11px;color:#6b7898;flex-shrink:0;font-family:'DM Mono',monospace;">${r.hasGoal?(done?'🏆':gpct.toFixed(0)+'%'):''}</div>
+                <span id="${rid}_chev" style="font-size:12px;color:#374060;flex-shrink:0;transition:transform .15s;">▾</span>
               </div>
-              <!-- BIG "profit needed" -->
-              <div style="display:flex;align-items:baseline;justify-content:flex-end;">
-                ${achieved
-                  ?`<div style="font-size:22px;font-weight:700;font-family:'DM Mono',monospace;color:#f59e0b;">Goal reached! 🎉</div>`
-                  :`<div style="text-align:right;">
-                      <div style="font-size:11px;color:#4b5a7a;margin-bottom:2px;">Profit needed</div>
-                      <div style="font-size:28px;font-weight:700;font-family:'DM Mono',monospace;color:#ef4444;letter-spacing:-.5px;">${fmtM(remaining)}</div>
-                    </div>`
-                }
+              <div id="${rid}_body" style="display:none;padding:10px 12px 12px 30px;border-top:1px solid #1a1f2e;">
+                <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-end;">
+                  <div><div style="font-size:9px;color:#374060;margin-bottom:2px;">Return</div><div style="font-size:13px;font-family:'DM Mono',monospace;color:${r.pct!==null?(r.pct>=0?'#22c55e':'#ef4444'):'#374060'};">${r.pct!==null?`${r.pct>=0?'+':''}${r.pct.toFixed(2)}%`:'—'}</div></div>
+                  ${r.hasGoal?`<div><div style="font-size:9px;color:#374060;margin-bottom:2px;">Profit / goal</div><div style="font-size:13px;font-family:'DM Mono',monospace;color:#c8d4e8;">${fmtM(r.gp.profit)} / ${fmtC(r.gp.goal)}</div></div>
+                  ${r.gp.targetBalance?`<div><div style="font-size:9px;color:#374060;margin-bottom:2px;">Target balance</div><div style="font-size:13px;font-family:'DM Mono',monospace;color:#6b7898;">${fmtC(r.gp.targetBalance)}</div></div>`:''}
+                  <div><div style="font-size:9px;color:#374060;margin-bottom:2px;">${done?'Status':'Profit needed'}</div><div style="font-size:13px;font-family:'DM Mono',monospace;color:${done?'#f59e0b':'#ef4444'};">${done?'Reached 🎉':fmtM(r.gp.remaining)}</div></div>`:''}
+                  <div><div style="font-size:9px;color:#374060;margin-bottom:2px;">Withdrawn</div><div style="font-size:13px;font-family:'DM Mono',monospace;color:${r.wd>0?'#f59e0b':'#374060'};">${r.wd>0?fmtC(r.wd):'—'}</div></div>
+                  <div style="margin-left:auto;display:flex;gap:6px;">
+                    <button onclick="event.stopPropagation();showWithdrawalModal('${r.id}')" style="padding:5px 10px;border-radius:6px;border:1px solid #f59e0b40;background:transparent;color:#f59e0b;font-size:10px;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;">💸 Payout</button>
+                    <button onclick="event.stopPropagation();showEditGoal('${r.id}')" style="padding:5px 10px;border-radius:6px;border:1px solid #2a3558;background:#1a2035;color:#e2e8f0;font-size:10px;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;">🎯 Goal</button>
+                  </div>
+                </div>
               </div>
             </div>`;
-          }).join('')
-          :`<div style="color:#4b5a7a;font-size:12px;">No profit goals set. <span style="color:#3b82f6;cursor:pointer;" onclick="setTab('accounts',document.querySelectorAll('.nav-tab')[5])">Add one in Accounts →</span></div>`}
-        </div>
-
+          }).join('')}
+        `:`<div style="color:#4b5a7a;font-size:12px;padding:8px 0;">No accounts in view. <span style="color:#3b82f6;cursor:pointer;" onclick="setTab('accounts',document.querySelectorAll('.nav-tab')[5])">Manage accounts →</span></div>`}
       </div>
 
     </div>
@@ -2900,7 +2973,7 @@ function renderSelBreakdown(){
 }
 
 function renderGoalCards(accounts){
-  const goalAccts=accounts.filter(a=>a.profit_goal);
+  const goalAccts=accounts.filter(a=>a.profit_goal&&!a.archived);
   if(!goalAccts.length)return'';
   return`<div style="margin-bottom:14px;">
     <div style="font-size:13px;font-weight:600;color:#c8d4e8;margin-bottom:10px;display:flex;align-items:center;gap:8px;">
@@ -4763,6 +4836,7 @@ const celebratedGoals=new Set();
 
 function checkGoalAchievements(showPopup=true){
   state.accounts.forEach(a=>{
+    if(a.archived)return; // archived accounts don't trigger goal popups
     const gp=goalProgress(a);
     if(!gp)return;
     const key=`${a.id}_${a.profit_goal}`;
