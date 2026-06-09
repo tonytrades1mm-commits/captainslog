@@ -1864,8 +1864,36 @@ async function processBulkImport(){
     const acct = state.accounts.find(a=>a.id===item.assignedAcctId);
     if(!acct){ totalSkipped+=item.trades.length; continue; }
 
-    const existing=new Set(acct.trades.map(t=>`${new Date(t.date).toISOString()}|${t.symbol}|${t.pnl}`));
-    const newTrades=item.trades.filter(t=>!existing.has(`${t.date.toISOString()}|${t.symbol}|${t.pnl}`));
+    // Duplicate detection uses a COUNT-based multiset, not a plain Set.
+    // Why: scalping produces many genuinely-distinct trades that share the same
+    // minute-resolution timestamp, symbol, and P&L. A Set keyed on those would
+    // collapse them into one. We instead (a) use a far more specific key that
+    // also includes side/qty/entry/exit, and (b) count occurrences so we only
+    // skip as many copies as already exist — any additional real copies import.
+    const tradeKey=(t)=>{
+      const d=(t.date instanceof Date)?t.date:new Date(t.date);
+      return [
+        d.toISOString(),
+        t.symbol,
+        t.side,
+        t.qty,
+        (Number(t.entry)||0).toFixed(4),
+        (Number(t.exit)||0).toFixed(4),
+        (Number(t.pnl)||0).toFixed(2)
+      ].join('|');
+    };
+    const existingCounts={};
+    acct.trades.forEach(t=>{const k=tradeKey(t);existingCounts[k]=(existingCounts[k]||0)+1;});
+    const seenInFile={};
+    const newTrades=item.trades.filter(t=>{
+      const k=tradeKey(t);
+      const have=existingCounts[k]||0;
+      const seen=seenInFile[k]||0;
+      seenInFile[k]=seen+1;
+      // Skip only if the account already holds at least (seen+1) copies of this
+      // exact trade. Otherwise it's a new/additional real trade → import it.
+      return seen>=have;
+    });
 
     if(!newTrades.length){ totalSkipped+=item.trades.length; continue; }
 
