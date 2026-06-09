@@ -979,7 +979,7 @@ async function loadData(){
       const acctTrades=trades.filter(t=>t.account_id===a.id).map(t=>{
         const tr={
           date:new Date(t.date),symbol:t.symbol,side:t.side,qty:t.qty,
-          entry:t.entry,exit:t.exit,pnl:t.pnl,fees:t.fees,netPnl:t.net_pnl,dbId:t.id,
+          entry:t.entry,exit:t.exit,pnl:t.pnl,fees:t.fees,netPnl:t.net_pnl,dbId:t.id,fillId:t.fill_id||'',
           accountId:a.id
         };
         return tr;
@@ -1034,6 +1034,62 @@ async function syncFeesToDB(){
     toast(`Fees synced for ${affected.length} trades ✓`,'success');
   }catch(e){setSyncStatus('err','Sync failed');toast('Sync failed: '+e.message,'error');}
 }
+
+// ── DUPLICATE TRADE CLEANUP ──────────────────────────────────────────────────
+// Exact-content key. Two trades collapse only if EVERY field matches: full-
+// precision timestamp, symbol, side, qty, entry, exit, and pnl. This is the
+// same signature the importer now uses to detect dupes.
+function dupTradeKey(t){
+  if(t.fillId) return 'FID:'+t.fillId;
+  const d=(t.date instanceof Date)?t.date:new Date(t.date);
+  return [
+    d.toISOString(), t.symbol, t.side, t.qty,
+    (Number(t.entry)||0).toFixed(4),
+    (Number(t.exit)||0).toFixed(4),
+    (Number(t.pnl)||0).toFixed(2)
+  ].join('|');
+}
+
+// Scan every account, group trades by exact-content key, and flag the extras
+// (everything beyond the first copy in each group) for removal.
+function findDuplicateTrades(){
+  const report=[];
+  state.accounts.forEach(a=>{
+    const groups={};
+    a.trades.forEach(t=>{const k=dupTradeKey(t);(groups[k]=groups[k]||[]).push(t);});
+    const toRemove=[];
+    Object.values(groups).forEach(g=>{ if(g.length>1) toRemove.push(...g.slice(1)); });
+    if(toRemove.length) report.push({account:a, dupCount:toRemove.length, toRemove, total:a.trades.length});
+  });
+  return report;
+}
+
+async function removeDuplicateTrades(){
+  const report=findDuplicateTrades();
+  if(!report.length){toast('No duplicate trades found','success');return;}
+  const totalDup=report.reduce((s,r)=>s+r.dupCount,0);
+  const breakdown=report.map(r=>`• ${r.account.name}: remove ${r.dupCount} of ${r.total}`).join('\n');
+  if(!confirm(`Found ${totalDup} duplicate trade${totalDup!==1?'s':''} across ${report.length} account${report.length!==1?'s':''}:\n\n${breakdown}\n\nThis keeps ONE copy of each identical trade and deletes the rest. This cannot be undone.\n\nContinue?`))return;
+  setSyncStatus('syncing','Removing duplicates...');
+  let removed=0;
+  try{
+    for(const r of report){
+      const ids=r.toRemove.map(t=>t.dbId).filter(Boolean);
+      for(let i=0;i<ids.length;i+=50){
+        const chunk=ids.slice(i,i+50);
+        // PostgREST in-filter; quote text ids to be safe
+        await sb.del('trades',`?id=in.(${chunk.map(id=>`"${id}"`).join(',')})`);
+        removed+=chunk.length;
+      }
+      const removeSet=new Set(r.toRemove);
+      r.account.trades=r.account.trades.filter(t=>!removeSet.has(t));
+    }
+    setSyncStatus('ok','Synced');
+    toast(`Removed ${removed} duplicate trade${removed!==1?'s':''} ✓`,'success');
+    renderAll();
+  }catch(e){setSyncStatus('err','Cleanup failed');toast('Failed: '+e.message,'error');}
+}
+
 function calcCommission(trade, acctPropFirmId){
   if(!acctPropFirmId) return null; // no prop firm assigned, leave fees alone
   const rates=state.commissionRates.filter(r=>r.prop_firm_id===acctPropFirmId);
@@ -1729,6 +1785,22 @@ async function deleteAccount(id){
   catch(e){setSyncStatus('err','Delete failed');toast('Failed: '+e.message,'error');}
 }
 
+// Wipe an account's trades but keep the account, its settings, prop firm link,
+// goal, and withdrawals. Use this to re-import a CSV from a clean slate.
+async function clearAccountTrades(id){
+  const a=state.accounts.find(x=>x.id===id);
+  if(!a)return;
+  if(!confirm(`Delete all ${a.trades.length} trades on "${a.name}"?\n\nThe account, its settings, prop firm, goal, and withdrawals are kept. Use this to re-import a CSV cleanly. This cannot be undone.`))return;
+  setSyncStatus('syncing','Clearing trades...');
+  try{
+    await sb.del('trades',`?account_id=eq.${id}`);
+    a.trades=[];
+    setSyncStatus('ok','Synced');
+    toast(`Cleared trades on "${a.name}" — now re-import`,'success');
+    renderAll();
+  }catch(e){setSyncStatus('err','Clear failed');toast('Failed: '+e.message,'error');}
+}
+
 // Archive: hides the account everywhere (sidebar, dashboard, charts, groups,
 // totals) but preserves every trade, withdrawal, and prop firm link. Fully
 // reversible via unarchiveAccount. Data is not deleted.
@@ -1895,13 +1967,13 @@ async function processBulkImport(){
     const acct = state.accounts.find(a=>a.id===item.assignedAcctId);
     if(!acct){ totalSkipped+=item.trades.length; continue; }
 
-    // Duplicate detection uses a COUNT-based multiset, not a plain Set.
-    // Why: scalping produces many genuinely-distinct trades that share the same
-    // minute-resolution timestamp, symbol, and P&L. A Set keyed on those would
-    // collapse them into one. We instead (a) use a far more specific key that
-    // also includes side/qty/entry/exit, and (b) count occurrences so we only
-    // skip as many copies as already exist — any additional real copies import.
+    // Duplicate detection. When the CSV carries Tradovate fill IDs, we key on
+    // those — they're unique per trade and identical across re-imports, so dedup
+    // is exact (no false positives even for genuinely identical scalps). When a
+    // row has no fill id, we fall back to a COUNT-based multiset on trade content
+    // (date/symbol/side/qty/entry/exit/pnl) so repeated identical fills survive.
     const tradeKey=(t)=>{
+      if(t.fillId) return 'FID:'+t.fillId;
       const d=(t.date instanceof Date)?t.date:new Date(t.date);
       return [
         d.toISOString(),
@@ -1922,7 +1994,7 @@ async function processBulkImport(){
       const seen=seenInFile[k]||0;
       seenInFile[k]=seen+1;
       // Skip only if the account already holds at least (seen+1) copies of this
-      // exact trade. Otherwise it's a new/additional real trade → import it.
+      // exact trade. For fill-id keys "have" is 0 or 1, so this is exact.
       return seen>=have;
     });
 
@@ -1939,7 +2011,8 @@ async function processBulkImport(){
       exit:t.exit,
       pnl:t.pnl,
       fees:t.fees,
-      net_pnl:t.netPnl
+      net_pnl:t.netPnl,
+      fill_id:t.fillId||null
     }));
 
     try{
@@ -2059,7 +2132,7 @@ function parseTradovate(text){
     headers.forEach((h,idx)=>r[h]=(cols[idx]||'').trim());
 
     try{
-      let pnl, qty, symbol, side, entry, exit, date, fees=0;
+      let pnl, qty, symbol, side, entry, exit, date, fees=0, fillId='';
 
       if(isPositionFormat){
         // ── Tradovate Position/Trade History format ──────────────────
@@ -2072,6 +2145,11 @@ function parseTradovate(text){
         exit   = parseFloat(r['sellprice']||0);
         pnl    = parseMoney(r['pnl']);
         fees   = 0;
+        // Tradovate assigns a unique fill id to each side of the trade. The
+        // pair uniquely identifies this trade and survives re-imports, so it's
+        // the perfect dedup key.
+        const bf=(r['buyfillid']||'').trim(), sf=(r['sellfillid']||'').trim();
+        if(bf||sf) fillId=`${bf}-${sf}`;
 
         const buyTs  = parseDate(r['boughttimestamp']);
         const sellTs = parseDate(r['soldtimestamp']);
@@ -2103,12 +2181,15 @@ function parseTradovate(text){
         const dateStr = r['fill time']||r['date/time']||r['timestamp']||r['date']||'';
         date   = parseDate(dateStr);
         if(!date||isNaN(date.getTime())) continue;
+        // Some fill/order exports carry an order or fill id — use if present
+        const fid=(r['fillid']||r['fill id']||r['orderid']||r['order id']||r['id']||'').trim();
+        if(fid) fillId=fid;
       }
 
       const netPnl = pnl - Math.abs(fees);
       // Try to extract account name/id from the row
       const acctName = r['account']||r['account name']||r['account_name']||r['account #']||r['accountid']||r['account id']||'';
-      trades.push({date, symbol, side, qty, entry, exit, pnl:pnl||0, fees:Math.abs(fees), netPnl, _csvAccount: acctName.trim()});
+      trades.push({date, symbol, side, qty, entry, exit, pnl:pnl||0, fees:Math.abs(fees), netPnl, fillId, _csvAccount: acctName.trim()});
 
     } catch(e){
       // skip unparseable rows
@@ -4475,6 +4556,7 @@ function renderAccountsView(){
       ${archivedCount>0?`<button class="btn btn-ghost" onclick="toggleShowArchived()">${showArchived?'← Back to active':`📁 Show archived (${archivedCount})`}</button>`:''}
       <button class="btn btn-ghost" onclick="showPropFirmModal()">🏢 Prop Firms</button>
       <button class="btn btn-ghost" onclick="syncFeesToDB()" title="Write the journal's calculated commission values back to Supabase so both match">↺ Sync Fees to DB</button>
+      <button class="btn btn-ghost" onclick="removeDuplicateTrades()" title="Find and remove duplicate trades created by re-importing the same CSV" style="color:#f59e0b;border-color:#f59e0b40;">⧉ Remove Duplicates</button>
       <button class="btn btn-primary" onclick="showAddAccount()">+ Add Account</button>
     </div>
     ${!visible.length?`<div class="empty-state"><div class="empty-icon">${showArchived?'📁':'🗂'}</div><div class="empty-title">${showArchived?'No archived accounts':'No accounts yet'}</div>${showArchived?'<div class="empty-sub">Closed accounts will appear here.</div>':''}</div>`:
@@ -4511,6 +4593,7 @@ function renderAccountsView(){
               <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="showEditGoal('${a.id}')">🎯 Goal</button>
               <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;color:#f59e0b;border-color:#f59e0b40;" onclick="showWithdrawalModal('${a.id}')">💸 Payout</button>
               <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="showImportForAcct('${a.id}')">↑ Import</button>
+              <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;color:#f59e0b;border-color:#f59e0b40;" onclick="clearAccountTrades('${a.id}')" title="Delete all trades on this account (keeps the account) so you can re-import cleanly">⌫ Clear Trades</button>
               <button class="btn btn-ghost" style="font-size:11px;padding:5px 10px;margin-left:4px;color:#9ba8c4;border-color:#3a4566;" onclick="archiveAccount('${a.id}')" title="Close this account — hides it but keeps all data. Reversible.">🗄 Close</button>
               <button class="btn btn-danger" style="font-size:11px;padding:5px 10px;margin-left:4px;" onclick="deleteAccount('${a.id}')">Delete</button>`}
         </div>
